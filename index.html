@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Hendrix</title>
+    <link rel="stylesheet" href="styles/home.css">
+    <link rel="stylesheet" href="styles/data-title.css">
+    <link rel="stylesheet" href="styles/range.css">
+    <script src="scripts/jscolor.js"></script>
+    <script src="scripts/sweetalert.min.js"></script>
+
+</head>
+<script>
+    window.addEventListener(`load`, () => {
+        // You can also require other files to run in this process
+        require('./renderer.js'); //main script
+    });
+</script>
+
+<body>
+    <div class="title-bar">
+        <div class="app-name-container">HENDRIX</div>
+        <div class="window-controls-container">
+            <div id="about-program" class="about-program"></div>
+            <div id="exit-button" class="exit-button"></div>
+            <div id="minimize-button" class="minimize-button"></div>
+            <div id="min-max-button" class="min-max-button"></div>
+            <div id="close-button" class="close-button"></div>
+        </div>
+    </div>
+    <div id="main">
+        <div>
+            Ваше ненастоящее имя:
+        </div>
+        <input type="text" id="name" style="text-align: center;"><br>
+        Ваш любимый цвет: <br><br>
+        <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'66ccff' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;"
+            id="color"><br>
+        Секретный токен:
+        <input type="password" id="token"><br>
+        <button id="next">Далее</button>
+    </div>
+    <div id="chat" style="transform: scale(0, 0)">
+        <div id="servers">
+            <br>
+            <div id="serverMenu">
+                <div id="opncls"></div>
+                <div id="showRoomModal"></div>
+                <div id="connectToTheHiddenRoom"></div>
+            </div>
+            <br>
+            <input type="text" style="background-color: #0e1621;" id="roomFilter">
+            <br>
+            <table id="rooms" style="display: inline-block; border-collapse: collapse;">
+                <tr>
+                    <th>
+                        Название комнаты
+                    </th>
+                    <th>
+                        Участников
+                    </th>
+                    <th>
+                        Защищена
+                    </th>
+                </tr>
+            </table>
+        </div>
+        <div id="title">
+                <div id="titleText"></div>
+                <div id="test">
+                    <div id="settings"></div>
+                    <div id="disconnect"></div>
+                    <div id="clear"></div>
+                </div>
+        </div>
+        <img src="styles/scrolldown.png" id="scrolldown">
+        <div id="dialog"></div>
+        <div id="typing"></div>
+        <div id="message">
+            <div id="file"></div>
+            <!-- <div> -->
+            <textarea id="inputMessage"></textarea>
+            <!-- </div> -->
+            <div id="send"><img src="styles/audio.png" style="width: 32px;"></div>
+        </div>
+    </div>
+    <div id="AddRoomModalBody" style="display: none;">
+        <br>Название комнаты:<br><br>
+        <input type="text" id="roomName"><br><br>
+        <span data-title="Оставьте поле пустым, чтобы сделать комнату без пароля">Пароль для входа:</span><br><br>
+        <input type="password" id="roomPassword"><br><br>
+        Цвет названия:<br><br>
+        <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'66ccff' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;" id="roomColor"><br><br>
+        <div style="display: flex;justify-content: center;align-items: center;flex-direction: row;"><input type="checkbox" id="hidden" style="margin-right:5px;">Скрытая комната</div>
+    </div>
+    <div id="settingsBlock" style="display: none;">
+        <h3>Настройки</h3>
+        <pre class="des">Уровень громкости <input type="range" min="0" max="1" step="0.01" id="volume" value="1"><span id="curVolume">100%</span></pre>
+        <pre class="des">Папка загрузок: <input type="text" id="downloads"><img id="folder" src="styles/folder.png" style="width: 20px; margin-left: 5px;"><img id="updateFolder" src="styles/updateFolder.png" style="width: 20px; margin-left: 5px;"></pre>
+        <button id="createDump">Создать дамп переписки</button><br><br>
+        Пароль<br>
+        <input type="password" id="dumpPassword"><br><br>
+        <button id="loadDump">Загрузить дамп переписки</button><br><br>
+        Пароль<br>
+        <input type="password" id="dumpLoadPassword">
+    </div>
+</body>
+
+</html>

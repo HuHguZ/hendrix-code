@@ -1,0 +1,44 @@
+{
+  "name": "Hendrix",
+  "version": "1.2.0",
+  "description": "Hendrix messenger",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "build-win": "electron-packager . Hendrix --asar --overwrite --icon ./icons/logo.ico",
+    "build-win-": "electron-packager . Hendrix --overwrite --icon ./icons/logo.ico",
+    "build-linux": "electron-packager . Hendrix --platform linux --asar --overwrite --icon ./icons/logo.ico",
+    "build-all": "electron-packager . Hendrix --all --asar --overwrite --icon ./icons/logo.ico",
+    "build-mac": "electron-packager . Hendrix --platform=darwin --asar --overwrite --icon ./icons/logo2.icns",
+    "pack": "build --dir"
+  },
+  "build": {
+    "appId": "com.hendrix.id",
+    "productName": "Hendrix",
+    "win": {
+      "target": "nsis",
+      "icon": "icons/logo.ico"
+    }
+  },
+  "keywords": [
+    "Electron",
+    "quick",
+    "start",
+    "tutorial",
+    "demo"
+  ],
+  "author": "HuHguZ",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^4.0.4",
+    "electron-winstaller": "^2.7.0"
+  },
+  "dependencies": {
+    "aes-js": "^3.1.2",
+    "node-gyp": "^3.8.0",
+    "node-rsa": "^1.0.2",
+    "pbkdf2": "^3.0.17",
+    "request": "^2.88.0"
+  }
+}

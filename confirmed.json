@@ -1,0 +1,47 @@
+{
+    "6d0f0e4a7d59486dea856eb213516274f5d48777b579236d2b933dbd51a9303d0e52681e03d32b59fc99b0c8fdbbe2032241ea7a93f91056ed0bc98dbd0b374f": {
+        "badges": [
+            {
+                "description": "Главный разработчик",
+                "badge": 1
+            },
+            {
+                "description": "Спонсор",
+                "badge": 2
+            }
+        ],
+        "root": true
+    },
+    "6d218346097c46fa787b7081b7cb37707b59b571733e8994744e9267582a35225663496da57ad57960731cd59f29082344d32b559d9132f4dca75b2c51601ed2": {
+        "badges": [
+            {
+                "description": "Музыкальный продюсер",
+                "badge": 3
+            },
+            {
+                "description": "Пидор, который не делает новых звуков",
+                "badge": 5
+            },
+            {
+                "description": "Великий ГУКМЭН",
+                "badge": 7
+            }
+        ]
+    },
+    "7f1522fea41b5319ddcdbb2116c597c4cc96819f2611061885d2f2152d16483ea04450bdbbdf3d6b69bf7fe150448b5dd82503d9165a9e95fc2c579d182b59f5": {
+        "badges": [
+            {
+                "description": "Баголовец",
+                "badge": 3
+            }
+        ]
+    },
+    "faadbf7897210f86d58b4a33d939b131ceef07488958a75248ad6ceee4b53984c7ae0ed47bea650dd681ad550c90681d48c47a6a4291da84a7ffc80cfc43dada": {
+        "badges": [
+            {
+                "description": "It Was Never A Mask",
+                "badge": 6
+            }
+        ]
+    }
+}

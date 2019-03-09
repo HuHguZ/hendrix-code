@@ -1,0 +1,532 @@
+@font-face {
+    font-family: "Langdon";
+    src: url("Langdon.otf") format("opentype");
+}
+
+@font-face {
+    font-family: 'MainFont';
+    src: url('OpenSans-Regular.ttf') format('truetype');
+}
+
+*::selection {
+    background-color: #2e70a5;
+}
+
+*::-webkit-scrollbar-track {
+    background-color: #2e343c;
+    opacity: 0.75;
+}
+
+*::-webkit-scrollbar {
+    width: 8px;
+    background-color: #2e343c;
+    opacity: 0.75;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: #545a60;
+    opacity: 0.75;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.title-bar {
+    -webkit-app-region: drag;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    background-color: #242f3d;
+    height: 20px;
+    font-size: 20px;
+    color: #576673;
+    padding-left: 4px;
+    font-family: Langdon;
+    text-align: center;
+}
+
+.app-name-container {
+    align-self: center;
+}
+
+.window-controls-container {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.minimize-button, .exit-button, .about-program {
+    -webkit-app-region: no-drag;
+    width: 20px;
+
+    background-size: 70% 70%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.about-program {
+    background-image: url(../tray.png);
+}
+
+.minimize-button {
+    background-image: url(-.png);
+}
+
+.exit-button {
+    background-image: url(exit.png);
+}
+
+.minimize-button:hover, .exit-button:hover, .min-max-button:hover, .about-program:hover {
+    filter: brightness(150%);
+    background-color: #25303e;
+}
+
+.min-max-button {
+    -webkit-app-region: no-drag;
+    width: 20px;
+    background-image: url(max.png);
+    background-size: 70% 70%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.close-button {
+    -webkit-app-region: no-drag;
+    font-weight: bold;
+    width: 20px;
+    background-image: url(x.png);
+    background-size: 60% 60%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.close-button:hover {
+    filter: brightness(150%);
+    background-color: #ff0d26;
+}
+
+.messageBlock {
+    background-color: #182533;
+    padding: 7px;
+    margin-top: 10px;
+    border-radius: 5px;
+    font-family: MainFont;
+    font-size: 14px;
+    user-select: text;
+    word-wrap: break-word;
+    display: grid;
+    grid-template-columns: 25% 75%;
+    grid-template-rows: auto auto;
+    grid-auto-flow: column;
+    grid-template-areas:
+        'name date'
+        'message message';
+}
+
+.lnk {
+    color: #13bbf9;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.lnk:hover {
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.user:hover {
+    cursor: pointer;
+}
+
+.hidden {
+    transition-duration: .2s;;
+    opacity: 0;
+}
+
+.hidden:hover {
+    opacity: 1;
+}
+
+pre {
+    white-space: pre-wrap;       /* css-3 */
+    white-space: -moz-pre-wrap;  /* Mozilla, с 1999 */
+    white-space: -pre-wrap;      /* Opera 4-6 */
+    white-space: -o-pre-wrap;    /* Opera 7 */
+    word-wrap: break-word;
+    font-family: MainFont;
+    font-size: 14px;
+}
+
+.name {
+    grid-area: name;
+    font-weight: bold;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    flex-direction: row;
+}
+
+.des {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.member {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: row;
+}
+
+.h3 {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.con {
+    grid-area: con;
+    text-align: center;
+}
+
+.date {
+    grid-area: date;
+    text-align: right;
+}
+
+.message {
+    margin: 0;
+    grid-area: message;
+}
+
+.swal-overlay {
+    z-index: 10;
+}
+
+.confirmed {
+    user-select: none;
+    height: 18px;
+    margin-left: 2px;
+}
+
+.confirmed:hover {
+    cursor: pointer;
+}
+#AddRoomModalBody, #settingsBlock {
+    background-color: #17212b;
+    font-family: MainFont;
+    font-size: 14px;
+    color: #def0ff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+#roomFilter {
+    transition-duration: .35s;
+}
+
+#scrolldown {
+    display: none;
+    position: absolute;
+    right: 10px;
+    bottom: 9vh;
+    height: 32px;
+}
+
+#main {
+    color: #def0ff;
+    user-select: none;
+    font-family: MainFont;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    height: 100vh;
+    font-size: 14px;
+    cursor: default;
+    overflow: auto;
+    transition-duration: .35s;
+
+}
+
+#servers {
+    background: #0e1621;
+    text-align: center;
+    overflow: auto;
+    grid-area: ser;
+    transition-duration: .35s;
+}
+
+#title {
+    user-select: text;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-direction: row;
+    background-color: #1a2634;
+    grid-area: tit;
+}
+
+.sendFile {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    flex-direction: row;
+}
+
+.header:hover {
+    cursor: pointer;
+}
+
+#dialog {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 10px;
+    grid-area: dil;
+    display: flex;
+    justify-content: flex-start;
+    flex-direction: column;
+}
+
+#message {
+    background-color: #242f3d;
+    grid-area: msg;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+#typing {
+    grid-area: typ;
+    background-color: #17212b;
+    padding-left: 10px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+#send, #file {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    font-family: MainFont;
+    height: 32px;
+    width: 32px;
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    background-size: 80% 80%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+#file {
+    background-image: url(att.png);
+}
+
+#send {
+    transition-duration: .1s;
+    /* background-image: url(send.png); */
+}
+#titleText {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+#test {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+#clear, #settings, #disconnect {
+    width: 20px;
+    height: 20px;
+    background-size: 80% 80%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+#settings {
+    background-image: url(settings.png);
+}
+
+#clear {
+    background-image: url(clear.png);
+}
+
+#disconnect {
+    background-image: url(exit.png);
+}
+
+#file:hover, #send:hover, #clear:hover, #scrolldown:hover, #disconnect:hover, #settings:hover, #folder:hover, #updateFolder:hover {
+    filter: brightness(150%);
+    cursor: pointer;
+}
+
+#send {
+    font-size: 3em;
+}
+
+
+
+#chat {
+    color: #def0ff;
+    user-select: none;
+    font-family: MainFont;
+    display: grid;
+    grid-template-columns: 25vw 75vw;
+    grid-auto-flow: column;
+    grid-template-areas:
+        "ser tit"
+        "ser dil"
+        "ser typ"
+        "ser msg";
+    grid-template-rows: 3vh 86vh 3vh 8vh;
+    font-size: 14px;
+    cursor: default;
+    overflow: auto;
+    transition-duration: .35s;
+}
+
+#serverMenu {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: row;
+    transition-duration: .35s;
+    opacity: 0;
+}
+
+#opncls, #showRoomModal, #connectToTheHiddenRoom {
+    height: 32px;
+    width: 32px;
+    border-radius: 10px;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+#opncls {
+    background-image: url(menutoggle.png);
+}
+
+#showRoomModal {
+    background-image: url(+.png);
+}
+
+#connectToTheHiddenRoom {
+    background-image: url(hidden.png);
+}
+
+#opncls:hover, #showRoomModal:hover, #connectToTheHiddenRoom:hover {
+    filter: brightness(150%);
+    background-color: #25303e;
+    cursor: pointer;
+}
+
+.room:hover {
+    background-color: #25303e;
+    cursor: pointer;
+}
+
+td, th {
+    padding: 5px;
+    vertical-align: middle;
+}
+
+textarea {
+    display: inline;
+    font-family: MainFont;
+    font-size: 14px;
+    outline: none;
+    color: #def0ff;
+    overflow-y: auto;
+    padding-left: 10px;
+    border: none;
+    flex-grow: 5;
+    background-color: #242f3d;
+}
+
+input[type="text"], input[type="password"], .jscolor, .swal-content__input {
+    font-family: MainFont;
+    font-size: 14px;
+    border: none;
+    border-bottom: 1px solid #def0ff;
+    background: #17212b;
+    outline: none;
+    color: #def0ff;
+    text-align: center;
+}
+
+#hidden {
+    background-color: red;
+}
+
+.swal-content__input:focus {
+    border-bottom: 1px solid #def0ff;
+}
+
+.jscolor {
+    border: none;
+}
+
+.swal-overlay, .swal-overlay--show-modal {
+    outline: none;
+}
+
+.swal-modal, .swal-title, .swal-text {
+    background-color: #17212b;
+    font-family: MainFont;
+    color: #def0ff;
+    user-select: none;
+    cursor: default;
+}
+
+.swal-text {
+    font-family: MainFont;
+    font-size: 14px;
+}
+
+/**/
+button, .swal-button, .swal-button--confirm {
+    font-family: MainFont;
+    font-size: 14px;
+    border: none;
+    border: 1px solid #def0ff;
+    border-radius: 2px;
+    background: #17212b;
+    outline: none;
+    color: #def0ff;
+    padding-left: 15px;
+    padding-right: 15px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    font-weight: bold;
+    transition-duration: .35s;
+}
+
+button:hover {
+    cursor: pointer;
+    transform: scale(1.1, 1.1);
+    color: #17212b;
+    background: #def0ff;
+    border: none;
+}
+
+/*
+*   фон полосы #2e343c
+*   цвет полосы прокрутки #545a60
+    цвет блока с серверами #0e1621
+*/
