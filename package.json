@@ -1,6 +1,6 @@
 {
   "name": "Hendrix",
-  "version": "1.2.0",
+  "version": "1.5.1",
   "description": "Hendrix messenger",
   "main": "main.js",
   "scripts": {
@@ -31,11 +31,13 @@
   "author": "HuHguZ",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^4.0.4",
+    "electron": "^5.0.7",
     "electron-winstaller": "^2.7.0"
   },
   "dependencies": {
     "aes-js": "^3.1.2",
+    "electron-notify": "^0.1.0",
+    "electron-packager": "^14.0.2",
     "node-gyp": "^3.8.0",
     "node-rsa": "^1.0.2",
     "pbkdf2": "^3.0.17",

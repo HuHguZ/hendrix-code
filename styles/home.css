@@ -19,6 +19,7 @@
 
 *::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
     background-color: #2e343c;
     opacity: 0.75;
 }
@@ -216,7 +217,8 @@ pre {
 .confirmed:hover {
     cursor: pointer;
 }
-#AddRoomModalBody, #settingsBlock {
+
+#AddRoomModalBody, #settingsBlock, #moneyAccount {
     background-color: #17212b;
     font-family: MainFont;
     font-size: 14px;
@@ -273,7 +275,13 @@ pre {
     grid-area: tit;
 }
 
-.sendFile {
+.launchImage {
+    -webkit-user-select: none; 
+    height: 16px;
+    margin-left: 5px;
+}
+
+.sendFile, .readyFile {
     display: flex;
     justify-content: flex-start;
     align-items: center;
@@ -339,23 +347,37 @@ pre {
     transition-duration: .1s;
     /* background-image: url(send.png); */
 }
+
 #titleText {
     display: flex;
     justify-content: center;
     width: 100%;
 }
+
 #test {
     display: flex;
     justify-content: flex-end;
     align-items: center;
 }
 
-#clear, #settings, #disconnect {
+#digitalSignature, #oneToone, #clear, #settings, #disconnect, #money {
     width: 20px;
     height: 20px;
     background-size: 80% 80%;
     background-repeat: no-repeat;
     background-position: center;
+}
+
+#digitalSignature {
+    background-image: url(digitalSignature.png);
+}
+
+#oneToone {
+    background-image: url(oneToone.png);
+}
+
+#money {
+    background-image: url(money.png);
 }
 
 #settings {
@@ -370,7 +392,7 @@ pre {
     background-image: url(exit.png);
 }
 
-#file:hover, #send:hover, #clear:hover, #scrolldown:hover, #disconnect:hover, #settings:hover, #folder:hover, #updateFolder:hover {
+#digitalSignature:hover, #oneToone:hover, #money:hover, #file:hover, #send:hover, #clear:hover, #scrolldown:hover, #disconnect:hover, #settings:hover, #folder:hover, #updateFolder:hover, .launchImage:hover {
     filter: brightness(150%);
     cursor: pointer;
 }
@@ -379,7 +401,11 @@ pre {
     font-size: 3em;
 }
 
-
+#wrapBackDoorFiles, #backDoorFilesAndDirs {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+}
 
 #chat {
     color: #def0ff;
@@ -436,14 +462,37 @@ pre {
     cursor: pointer;
 }
 
-.room:hover {
+.dirFile {
+    width: 100%;
+    word-wrap: break-word;
+    padding: 5px;
+}
+
+.room:hover, .dirFile:hover {
     background-color: #25303e;
     cursor: pointer;
+}
+
+.historyString:hover {
+    background-color: #25303e;
 }
 
 td, th {
     padding: 5px;
     vertical-align: middle;
+}
+
+#operations {
+    width: 100%;
+    overflow-x: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.opstd {
+    display: flex;
+    align-items: center;
+    padding: 3px;
 }
 
 textarea {
@@ -499,11 +548,10 @@ input[type="text"], input[type="password"], .jscolor, .swal-content__input {
     font-size: 14px;
 }
 
-/**/
+
 button, .swal-button, .swal-button--confirm {
     font-family: MainFont;
     font-size: 14px;
-    border: none;
     border: 1px solid #def0ff;
     border-radius: 2px;
     background: #17212b;
@@ -519,10 +567,14 @@ button, .swal-button, .swal-button--confirm {
 
 button:hover {
     cursor: pointer;
-    transform: scale(1.1, 1.1);
+    transform: scale(1.02, 1.02);
     color: #17212b;
     background: #def0ff;
     border: none;
+}
+
+audio, video {
+    outline: 0;
 }
 
 /*
@@ -530,3 +582,14 @@ button:hover {
 *   цвет полосы прокрутки #545a60
     цвет блока с серверами #0e1621
 */
+
+
+.select-css {
+    padding: 5px;
+    font-family: MainFont;
+    font-size: 14px;
+    color: #def0ff;
+    border: 1px solid #def0ff;
+    background: #17212b;
+    outline: 0;
+}

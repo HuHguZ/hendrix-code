@@ -5,26 +5,24 @@ const {
     BrowserWindow,
     ipcMain,
     Menu,
-    Notification,
     Tray,
-    webFrame,
-    dialog
+    dialog,
+    shell
 } = electron;
+
+let eNotify;
+const path = require(`path`);
 
 const gotTheLock = app.requestSingleInstanceLock();
 
-if (!gotTheLock && true) {
+if (!gotTheLock && false) {
     dialog.showErrorBox(`Ошибка!`, `Hendrix уже запущен!`);
     app.quit();
 }
 
-const {
-    template
-} = require('./app-menu-template');
-
 const request = require(`request`);
 
-const server = `http://62.109.31.175:8080`;
+const server = `http://92.63.98.195:8080`;
 
 const requestPostAsync = params => new Promise((resolve, reject) => {
     request.post(params, (err, httpResponse, body) => {
@@ -34,6 +32,8 @@ const requestPostAsync = params => new Promise((resolve, reject) => {
         resolve(JSON.parse(body));
     });
 });
+
+let once = true;
 
 setInterval(async () => {
     if (!_id) {
@@ -45,7 +45,8 @@ setInterval(async () => {
             _id
         }
     });
-    if (!r.alive) {
+    if (!r.alive && once) {
+        once = !once;
         dialog.showMessageBox({
             type: `error`,
             title: `Критическая ошибка!`,
@@ -59,12 +60,62 @@ ipcMain.on(`alive`, (event, arg) => {
     _id = arg;
 })
 
+ipcMain.on(`disableNotifications`, (event, data) => {
+    notificationStack = [];
+});
+
+const getOnClickFunc = text => () => {
+    const firstLink = (text.match(/\b(((https?|ftp):\/\/|www\.)[^\s']+)/g) || [])[0];
+    if (firstLink) {
+        shell.openExternal(firstLink);
+    }
+    if (mainWindow) {
+        mainWindow.show();
+    }
+};
+
+const appIcon = path.join(__dirname, `logo.png`);
+
+ipcMain.on(`notification`, (event, notification) => {
+    notification.title = `<span style="color: ${notification.color}">${notification.name}</span>`;
+    notification.onClickFunc = getOnClickFunc(notification.text);
+    notificationStack.push({
+        config: {
+            appIcon,
+            defaultStyleContainer: {
+                backgroundColor: '#0e1621',
+                overflow: 'hidden',
+                padding: `8px`,
+                fontFamily: 'Verdana',
+                fontSize: `12px`,
+                position: 'relative',
+                lineHeight: `12px`
+            },
+            defaultStyleText: {
+                color: '#def0ff'
+            }
+        },
+        notification
+    });
+});
+
+let notificationStack = [];
+
+setInterval(() => {
+    if (!notificationStack.length) {
+        return;
+    }
+    const note = notificationStack.shift();
+    eNotify.setConfig(note.config);
+    eNotify.notify(note.notification);
+}, 300);
+
 let _id = ``;
 
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
-let mainWindow, tray, mainUser;
+let mainWindow, tray;
 
 
 function createWindow() {
@@ -88,7 +139,7 @@ function createWindow() {
             zoomFactor: 1,
             devTools: !false,
             textAreasAreResizable: false,
-            nodeIntegration: true
+            nodeIntegration: true,
         }
     });
     mainWindow.once(`ready-to-show`, () => {
@@ -121,8 +172,12 @@ function createWindow() {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
+    eNotify = require(`electron-notify`);
     if (!(await requestPostAsync({
-            url: `${server}/check`
+            url: `${server}/check`,
+            form: {
+                version: app.getVersion()
+            }
         })).success) {
         dialog.showErrorBox(`Критическая ошибка!`, `Сервер недоступен или вы не подключены к сети. Повторите попытку позже.`);
         app.quit();
@@ -159,6 +214,3 @@ app.on('activate', function () {
         createWindow();
     }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

