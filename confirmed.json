@@ -4,10 +4,6 @@
             {
                 "description": "Главный разработчик",
                 "badge": 1
-            },
-            {
-                "description": "Спонсор",
-                "badge": 2
             }
         ],
         "root": true
