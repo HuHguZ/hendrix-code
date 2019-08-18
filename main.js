@@ -13,13 +13,6 @@ const {
 let eNotify;
 const path = require(`path`);
 
-const gotTheLock = app.requestSingleInstanceLock();
-
-if (!gotTheLock && false) {
-    dialog.showErrorBox(`Ошибка!`, `Hendrix уже запущен!`);
-    app.quit();
-}
-
 const request = require(`request`);
 
 const server = `http://92.63.98.195:8080`;
@@ -137,7 +130,7 @@ function createWindow() {
         backgroundColor: `#17212b`,
         webPreferences: {
             zoomFactor: 1,
-            devTools: !false,
+            devTools: false,
             textAreasAreResizable: false,
             nodeIntegration: true,
         }
@@ -159,12 +152,40 @@ function createWindow() {
     // Open the DevTools.
     mainWindow.webContents.openDevTools();
     // Emitted when the window is closed.
-    mainWindow.on('closed', async function () {
-        // Dereference the window object, usually you would store windows
-        // in an array if your app supports multi windows, this is the time
-        // when you should delete the corresponding element.
-        //тут делать запрос на дисконнект и удалять юзера
+    mainWindow.on('closed', function () {
         mainWindow = null;
+    });
+}
+
+let updateWindow;
+
+function createUpdateWindow() {
+    let width = 400;
+    let height = 400;
+    updateWindow = new BrowserWindow({
+        width,
+        height,
+        minWidth: width,
+        minHeight: height,
+        maxWidth: width,
+        maxHeight: height,
+        frame: false,
+        show: false,
+        icon: `${__dirname}/logo.png`,
+        backgroundColor: `#17212b`,
+        webPreferences: {
+            zoomFactor: 1,
+            devTools: false,
+            textAreasAreResizable: false,
+            nodeIntegration: true,
+        }
+    });
+    updateWindow.once(`ready-to-show`, () => {
+        updateWindow.show();
+    });
+    updateWindow.loadFile('updater.html');
+    updateWindow.on('closed', function () {
+        updateWindow = null;
     });
 }
 
@@ -173,16 +194,20 @@ function createWindow() {
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
     eNotify = require(`electron-notify`);
-    if (!(await requestPostAsync({
-            url: `${server}/check`,
-            form: {
-                version: app.getVersion()
-            }
-        })).success) {
-        dialog.showErrorBox(`Критическая ошибка!`, `Сервер недоступен или вы не подключены к сети. Повторите попытку позже.`);
+    const versionCheck = await requestPostAsync({
+        url: `${server}/check`,
+        form: {
+            version: app.getVersion()
+        }
+    });
+    if (!versionCheck) {
+        dialog.showErrorBox(`Критическая ошибка!`, `Сервер недоступен или вы не подключены к сети.`);
         app.quit();
+    } else if (versionCheck.success) {
+        createWindow();
+    } else {
+        createUpdateWindow();
     }
-    createWindow();
     tray = new Tray(`${__dirname}/tray.png`);
     const contextMenu = Menu.buildFromTemplate([{
         label: 'Quit Hendrix',
@@ -194,7 +219,7 @@ app.on('ready', async () => {
     tray.setToolTip('Hendrix');
     tray.setContextMenu(contextMenu);
     tray.on('click', () => {
-        mainWindow.show();
+        (mainWindow || updateWindow).show();
     });
 });
 

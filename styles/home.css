@@ -118,7 +118,7 @@ body {
     user-select: text;
     word-wrap: break-word;
     display: grid;
-    grid-template-columns: 25% 75%;
+    grid-template-columns: 75% 25%;
     grid-template-rows: auto auto;
     grid-auto-flow: column;
     grid-template-areas:
@@ -237,7 +237,7 @@ pre {
     display: none;
     position: absolute;
     right: 10px;
-    bottom: 9vh;
+    bottom: 16.5vh;
     height: 32px;
 }
 
@@ -254,7 +254,6 @@ pre {
     cursor: default;
     overflow: auto;
     transition-duration: .35s;
-
 }
 
 #servers {
@@ -302,12 +301,19 @@ pre {
     flex-direction: column;
 }
 
+#inputMessage {
+    width: 100%;
+    height: 90%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
 #message {
     background-color: #242f3d;
     grid-area: msg;
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
 }
 
@@ -328,8 +334,8 @@ pre {
     flex-direction: column;
     font-family: MainFont;
     height: 32px;
+    min-width: 32px;
     width: 32px;
-    margin-top: 10px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -345,7 +351,6 @@ pre {
 
 #send {
     transition-duration: .1s;
-    /* background-image: url(send.png); */
 }
 
 #titleText {
@@ -407,6 +412,18 @@ pre {
     flex-direction: column;
 }
 
+#add1 {
+    background: #0e1621;
+    grid-area: add1;
+    transition-duration: .35s;
+}
+
+#add2 {
+    background: #242f3d;
+    grid-area: add2;
+    transition-duration: .35s;
+}
+
 #chat {
     color: #def0ff;
     user-select: none;
@@ -418,8 +435,9 @@ pre {
         "ser tit"
         "ser dil"
         "ser typ"
-        "ser msg";
-    grid-template-rows: 3vh 86vh 3vh 8vh;
+        "ser msg"
+        "add1 add2";
+    grid-template-rows: minmax(18px, 3vh) 80vh 3vh 11vh 5vh;
     font-size: 14px;
     cursor: default;
     overflow: auto;
@@ -480,6 +498,11 @@ pre {
 td, th {
     padding: 5px;
     vertical-align: middle;
+}
+
+#oneToOneMessages {
+    width: 100%;
+    overflow-x: auto;
 }
 
 #operations {
@@ -573,7 +596,7 @@ button:hover {
     border: none;
 }
 
-audio, video {
+audio, video, div {
     outline: 0;
 }
 
