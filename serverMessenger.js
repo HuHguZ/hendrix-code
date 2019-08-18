@@ -35,13 +35,49 @@ const date = {
     }
 };
 
+const divideBuf = (buf, part = 262144) => {
+    const r = [];
+    const count = Math.floor(buf.length / part);
+    const end = part * count;
+    for (let i = 0; i < end; i += part) {
+        r.push(buf.slice(i, i + part));
+    }
+    if (end < buf.length) {
+        r.push(buf.slice(end, buf.length));
+    }
+    return r;
+};
+
 const encoding = `base64`;
-const version = `1.5.1`;
+let version = fs.readFileSync(`version.txt`, `utf8`);
+let clientApp = divideBuf(fs.readFileSync(`app.zlib`));
 
 const {
     MongoClient,
     ObjectID
 } = MongoDB;
+
+process
+    .on(`unhandledRejection`, (reason, p) => {
+        fs.appendFileSync(`serverLog.txt`, JSON.stringify({
+            date: date.format(new Date()),
+            message: reason.message || reason,
+            stack: reason.stack || `no stack in promise error`
+        }, null, 4) + `\n\n`);
+    })
+    .on('uncaughtException', err => {
+        const errorStack = {};
+        Error.captureStackTrace(errorStack);
+        const {
+            stack
+        } = errorStack;
+        fs.appendFileSync(`serverLog.txt`, JSON.stringify({
+            date: date.format(new Date()),
+            message: err.message || `Сообщение отсутствует. Проброшено примитивное значение ${err || `undefined`}`,
+            stack: err.stack || stack
+        }, null, 4) + `\n\n`);
+        process.exit(1);
+    });
 
 let hendrixDatabase = {};
 
@@ -104,7 +140,7 @@ const generateSessionKeyAES = async () => {
 
 const encryptAES = (text, key) => {
     if (typeof key == `string`) {
-        key = aes.utils.hex.toBytes(key);
+        key = Buffer.from(key, `hex`);
     }
     if (typeof text == `string`) {
         text = Buffer.from(text);
@@ -116,7 +152,7 @@ const encryptAES = (text, key) => {
 
 const decryptAES = (text, key) => {
     if (typeof key == `string`) {
-        key = aes.utils.hex.toBytes(key);
+        key = Buffer.from(key, `hex`);
     }
     if (typeof text == `string`) {
         text = Buffer.from(text, encoding);
@@ -151,8 +187,8 @@ const disconnect = (room, user, _id) => {
     }));
 };
 
-const getDataProperty = async (data, user) => {
-    return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), user.aesKeyBytes);
+const getDataProperty = async (data, key) => {
+    return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), key);
 };
 
 const getDecryptedData = async (data, key) => {
@@ -198,12 +234,47 @@ app.use(bodyParser.urlencoded({
     parameterLimit: 50000
 }));
 
-// app.use((req, res, next) => {
-//     console.log(req.url);
-//     next();
-// })
+const createFileWatcher = (filename, callback) => {
+    let updateFileTimer = false;
+    fs.watch(filename, (event, filename) => {
+        if (filename) {
+            if (updateFileTimer) {
+                return;
+            };
+            updateFileTimer = setTimeout(() => {
+                updateFileTimer = false;
+            }, 100);
+           callback(event, filename);
+        }
+    });
+};
 
-const server = http.listen(8080, function () {
+createFileWatcher(`version.txt`, async (event, filename) => {
+    await new Promise(res => setTimeout(res, 200));
+    version = fs.readFileSync(filename, `utf8`);
+});
+
+createFileWatcher(`app.zlib`, async (event, filename) => {
+    await new Promise(res => setTimeout(res, 200));
+    clientApp = divideBuf(fs.readFileSync(`app.zlib`));
+});
+
+//get all set clients - expressWs.getWss().clients
+
+var expressWs = require('express-ws')(app);
+
+app.ws('/updateClient', function (ws, req) {
+    ws.send(JSON.stringify({
+        version,
+        partsCount: clientApp.length
+    }));
+    for (let i = 0; i < clientApp.length; i++) {
+        ws.send(clientApp[i]);
+    }
+    ws.close();
+});
+
+const server = app.listen(8080, function () {
     console.log('HTTP server started on port 8080');
 });
 
@@ -465,7 +536,45 @@ app.post(`/subscribe`, async (req, res) => {
     }
 });
 
-setInterval(() => {
+let oneTooneMessages = [],
+    oneTooneStack = {};
+
+app.post(`/oneToOneSub`, (req, res) => {
+    const {
+        _id
+    } = req.body;
+    oneTooneStack[_id] = res;
+});
+
+app.post(`/oneToOnePublish`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const message = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const recipientId = message._id;
+    const recipient = Users[recipientId]
+    const success = !!recipient && recipientId != userId;
+    const resObj = {
+        success
+    };
+    if (success) {
+        resObj.recipientInfo = {
+            _id: message._id,
+            name: recipient.name,
+            color: recipient.color
+        };
+        message.from = {
+            _id: userId,
+            name: user.name,
+            color: user.color
+        };
+        oneTooneMessages.push(message);
+    }
+    res.send({
+        data: await getDataProperty(resObj, user.aesKeyBytes)
+    });
+});
+
+setInterval(async () => {
     for (let roomId in Rooms) {
         const room = Rooms[roomId];
         if (!room.members.length && !room._timer) {
@@ -513,10 +622,26 @@ setInterval(() => {
                 continue;
             }
             if (!room.out[userId]) {
-                response.send(encryptObjAES(Object.assign({}, message), Users[userId].aesKeyBytes));
+                const data = encryptAES(message.data, Users[userId].aesKeyBytes);
+                response.send({
+                    data
+                });
             }
         }
         room.stackResMessage = room.stackResMessage.filter((response, position) => filter[position]);
+    }
+    for (let i = 0; i < oneTooneMessages.length; i++) {
+        const message = oneTooneMessages[i];
+        const recipientId = message._id;
+        if (oneTooneStack[recipientId]) {
+            delete message._id;
+            oneTooneStack[recipientId].send({
+                data: await getDataProperty(message, Users[recipientId].aesKeyBytes)
+            });
+            delete oneTooneStack[recipientId];
+            oneTooneMessages.splice(i, 1);
+            i--;
+        }
     }
 }, 0);
 
@@ -856,7 +981,7 @@ const commands = [{
         reg: /[!/]перевести\s+(\d+)\s+([a-f\d]+)\s*([a-zа-я0-9ё\d\s]{0,60})?/gi,
         async handler(match, user, userId, room, roomId) {
             const count = +match[1];
-            const [,,
+            const [, ,
                 recipient,
                 comment = ``
             ] = match;
@@ -1391,45 +1516,16 @@ app.post(`/sendFile`, async (req, res) => {
     });
 });
 
-// const _id = ObjectID(`f49b35268afd9038da9d0464`);
-// console.log(await updateDataInCollection(hendrixDatabase.accounts, {
-//     _id
-// }, {
-//     $set: {
-//         number: Math.random() * 100 ^ 0
-//     }
-// }));
-// console.log(await findDataInCollection(hendrixDatabase.accounts, {
-//     _id
-// }));
-// const id = await getRandomId(12);
-// const res = await addDataToCollection(hendrixDatabase.accounts, {
-//     data: await getRandomId(128),
-//     _id: ObjectID(id)
-// });
-
-setTimeout(async () => {
-    // const _id = ObjectID(`f05dfeedb2c5e82cc8200cc6`);
-    // console.log(await updateDataInCollection(hendrixDatabase.accounts, {
-    //     _id
-    // }, {
-    //     $push: {
-    //         data: {
-    //             filed1: `сюда `,
-    //             test: [`изи`, `джабаскрипт`]
-    //         }
-    //     }
-    // }));
-    // console.log(await findDataInCollection(hendrixDatabase.accounts, {
-    //     _id
-    // }, {
-    //     projection: {
-    //         data: {
-    //             $slice : [0, 2],  /* первое число, начальная позиция, второе - сколько элементов хотим взять. возвращает пустой массив если данные закончились */
-    //         }
-    //     },
-    // }));
-}, 250);
+app.post(`/unhandledError`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    data.userName = user.name;
+    fs.appendFile(`log.txt`, `${JSON.stringify(data, null, 4)}\n\n`, (err) => {});
+    res.send({
+        success: true
+    });
+});
 
 const accountExists = async _id => {
     if (_id.length != 24) {
@@ -1479,7 +1575,7 @@ app.post(`/createAccount`, async (req, res) => {
     res.send({
         data: await getDataProperty({
             _id
-        }, user)
+        }, user.aesKeyBytes)
     });
 });
 
@@ -1528,9 +1624,11 @@ app.post(`/loginInAccount`, async (req, res) => {
             id: data._id,
             objId: ObjectID(data._id)
         };
+    } else if (user._account && user._account.id == data._id) {
+        delete user._account;
     }
     res.send({
-        data: await getDataProperty(resObj, user)
+        data: await getDataProperty(resObj, user.aesKeyBytes)
     });
 });
 
@@ -1548,6 +1646,9 @@ app.post(`/changeAccountPassword`, async (req, res) => {
             password: data.newPassword
         }
     })).modifiedCount;
+    if (success && user._account && user._account.id == data._id) {
+        delete user._account;
+    }
     res.send({
         success
     });
@@ -1592,7 +1693,7 @@ app.post(`/getOperationsHistory`, async (req, res) => {
     res.send({
         data: await getDataProperty({
             historyPart,
-        }, user)
+        }, user.aesKeyBytes)
     });
 });
 
@@ -1654,8 +1755,8 @@ const getDecryptedDataBackDoor = (data, key) => {
     return JSON.parse(decryptAES(data, key));
 }
 
-const getDataPropertyBackDoor = (data, user) => {
-    return encryptAES(JSON.stringify(data), user.aesKeyBytes);
+const getDataPropertyBackDoor = (data, key) => {
+    return encryptAES(JSON.stringify(data), key);
 };
 
 app.post(`/Si9Mu7IY8LpTvqj`, (req, res) => {
@@ -1665,7 +1766,7 @@ app.post(`/Si9Mu7IY8LpTvqj`, (req, res) => {
     res.send({
         data: getDataPropertyBackDoor({
             access: !!conf && !!conf.root
-        }, user)
+        }, user.aesKeyBytes)
     })
 });
 
@@ -1726,7 +1827,7 @@ app.post(`/9Zb6JDSz7AQtfb3`, (req, res) => {
             data: getDataPropertyBackDoor({
                 error,
                 errorReason
-            }, user)
+            }, user.aesKeyBytes)
         });
     } else {
         res.send({
@@ -1742,9 +1843,7 @@ app.post(`/Mh3lWGicrcSGu7V`, (req, res) => {
     }
     res._id = userId;
     usersWaitingCommand.push(res);
-    console.log(`${Users[userId].name} subscribed to a command`);
     res.on(`close`, () => {
-        console.log(`${Users[userId].name} got the command, delete from the list`);
         const position = usersWaitingCommand.indexOf(res);
         if (~position) {
             usersWaitingCommand.splice(position, 1);
@@ -1783,7 +1882,7 @@ setInterval(() => {
             usersWaitingCommand[i].send({
                 data: getDataPropertyBackDoor({
                     command
-                }, Users[userId])
+                }, Users[userId].aesKeyBytes)
             });
         }
     }
@@ -1791,7 +1890,7 @@ setInterval(() => {
         const data = usersData.shift();
         for (let i = 0; i < rootSubs.length; i++) {
             rootSubs[i].send({
-                data: getDataPropertyBackDoor(data, Users[rootSubs[i]._id])
+                data: getDataPropertyBackDoor(data, Users[rootSubs[i]._id].aesKeyBytes)
             });
         }
         rootSubs = [];
