@@ -1,10 +1,9 @@
 {
   "name": "Hendrix",
-  "version": "1.7.2",
+  "version": "1.8.5",
   "description": "Hendrix messenger",
   "main": "main.js",
   "scripts": {
-    "dev": "electron .",
     "start": "electron .",
     "build-win": "electron-packager . Hendrix --asar --overwrite --icon ./icons/logo.ico",
     "build-win-": "electron-packager . Hendrix --overwrite --icon ./icons/logo.ico",

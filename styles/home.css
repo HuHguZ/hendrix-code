@@ -234,10 +234,10 @@ pre {
 }
 
 #scrolldown {
-    display: none;
+    z-index: 1;
     position: absolute;
     right: 10px;
-    bottom: 16.5vh;
+    bottom: 10vh;
     height: 32px;
 }
 
@@ -311,10 +311,11 @@ pre {
 #message {
     background-color: #242f3d;
     grid-area: msg;
-    display: flex;
+    display: none;
     flex-direction: row;
     align-items: center;
     justify-content: center;
+    z-index: 2;
 }
 
 #typing {
@@ -359,18 +360,46 @@ pre {
     width: 100%;
 }
 
-#test {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-}
-
-#digitalSignature, #oneToone, #clear, #settings, #disconnect, #money {
+#showRoomsList {
+    display: none;
     width: 20px;
     height: 20px;
     background-size: 80% 80%;
     background-repeat: no-repeat;
     background-position: center;
+    background-image: url(menutoggle.png);
+}
+
+#leftMenu {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+#rightMenu {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.rightMenuButtons {
+    width: 20px;
+    height: 20px;
+    background-size: 80% 80%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+#screenRec {
+    background-image: url(screen.png);
+}
+
+#webcamRec {
+    background-image: url(webcam.png);
+}
+
+#audioRec {
+    background-image: url(audio.png);
 }
 
 #digitalSignature {
@@ -397,7 +426,7 @@ pre {
     background-image: url(exit.png);
 }
 
-#digitalSignature:hover, #oneToone:hover, #money:hover, #file:hover, #send:hover, #clear:hover, #scrolldown:hover, #disconnect:hover, #settings:hover, #folder:hover, #updateFolder:hover, .launchImage:hover {
+.rightMenuButtons:hover, #scrolldown:hover, #showRoomsList:hover, #file:hover, #send:hover, #folder:hover, #updateFolder:hover, .launchImage:hover {
     filter: brightness(150%);
     cursor: pointer;
 }
@@ -437,7 +466,8 @@ pre {
         "ser typ"
         "ser msg"
         "add1 add2";
-    grid-template-rows: minmax(18px, 3vh) 80vh 3vh 11vh 5vh;
+    grid-template-rows: minmax(18px, 3vh) 100vh 3vh 11vh 5vh;
+    /* grid-template-rows: minmax(18px, 3vh) 80vh 3vh 11vh 5vh; */
     font-size: 14px;
     cursor: default;
     overflow: auto;

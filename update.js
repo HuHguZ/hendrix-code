@@ -1,17 +1,11 @@
 const electron = require(`electron`);
 const {
     remote,
-    ipcRenderer,
     webFrame,
-    shell,
-    clipboard,
-    desktopCapturer
+    shell
 } = electron;
 const {
     dialog
-} = remote;
-const {
-    screen
 } = remote;
 let currentWindow = remote.getCurrentWindow();
 webFrame.setZoomFactor(1);
@@ -22,7 +16,30 @@ const fs = require(`fs`);
 const zlib = require(`zlib`);
 const path = require(`path`);
 const getElem = id => document.getElementById(id);
-const ws = new WebSocket(`ws://92.63.98.195:8080/updateClient`);
+const ws = new WebSocket(`ws://${require(`./config`).updateServer}/updateClient`);
+
+ws.on(`error`, e => {
+    dialog.showMessageBox(currentWindow, {
+        type: `error`,
+        title: `Ошибка!`,
+        message: `Невозможно подключиться к серверу обновлений! Скачайте последнюю версию Hendrix на Github.`
+    });
+    clearInterval(pictureRotateTimer);
+    clearInterval(downloadUpdateStatusTimer);
+    downloadUpdateStatus.style.color = `red`;
+    downloadUpdateStatus.style.fontWeight = `bold`;
+    downloadUpdateStatus.textContent = `Сервер обновлений недоступен`;
+    shell.openExternal(`https://github.com/HuHguZ/hendrix/releases`);
+    let maxDeg = Math.floor(deg % 360);
+    let backTimer = setInterval(() => {
+        maxDeg -= 4;
+        if (maxDeg <= 0) {
+            loadingUpdate.style.transform = `rotate(0deg)`;
+            return clearInterval(backTimer);
+        }
+        loadingUpdate.style.transform = `rotate(${maxDeg}deg)`;
+    }, 10);
+});
 
 const bufParts = [];
 
@@ -48,8 +65,6 @@ ws.on('close', function incoming(data) {
         require('original-fs').writeFileSync(path.join(`resources`, `app.asar`), zlib.unzipSync(Buffer.concat(bufParts)));
         remote.app.relaunch();
         remote.app.exit();
-    } else {
-        remote.app.exit();
     }
 });
 
@@ -64,13 +79,13 @@ getElem(`minimize-button`).addEventListener(`click`, () => {
 const loadingUpdate = getElem(`loadingUpdate`);
 const downloadUpdateStatus = getElem(`downloadUpdateStatus`);
 
-setInterval(() => {
+let downloadUpdateStatusTimer = setInterval(() => {
     downloadUpdateStatus.textContent = `Скачиваю обновление${".".repeat(pointCount++ % 5)}`;
 }, 500);
 
 let deg = 0, pointCount = 0;
 
-setInterval(() => {
+let pictureRotateTimer = setInterval(() => {
     loadingUpdate.style.transform = `rotate(${deg}deg)`;
     deg += 0.3;
 }, 10);
@@ -80,3 +95,7 @@ document.addEventListener(`keydown`, e => {
         e.preventDefault();
     }
 });
+
+document.addEventListener(`dragstart`, e => {
+    e.preventDefault();
+})

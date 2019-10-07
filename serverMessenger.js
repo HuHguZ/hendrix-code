@@ -176,6 +176,7 @@ const disconnect = (room, user, _id) => {
         console.log(user);
     }
     room.members.splice(room.members.indexOf(_id), 1);
+    delete room.stackMembersMachineIds[user._machineId];
     room.out[_id] = 1;
     delete user.curRoom;
     if (_id == room._creator && room.members.length) {
@@ -226,7 +227,7 @@ const getSystemMessage = msg => {
     });
 };
 
-const auth = (room, roomId, user, userId, password, disconnectFlag = false) => (!room.passwordProtected || room.passwordProtected && password == room.password) && (!room.banned[user._ip] || disconnectFlag);
+const auth = (room, roomId, user, userId, password, disconnectFlag = false) => (!room.passwordProtected || room.passwordProtected && password == room.password) && ((!room.banned[user._ip] && (!room.stackMembersMachineIds[user._machineId] || room.stackMembersMachineIds[user._machineId]._id == userId)) || disconnectFlag);
 
 app.use(bodyParser.urlencoded({
     limit: '50mb',
@@ -261,7 +262,7 @@ createFileWatcher(`app.zlib`, async (event, filename) => {
 
 //get all set clients - expressWs.getWss().clients
 
-var expressWs = require('express-ws')(app);
+const expressWs = require('express-ws')(app);
 
 app.ws('/updateClient', function (ws, req) {
     ws.send(JSON.stringify({
@@ -274,11 +275,69 @@ app.ws('/updateClient', function (ws, req) {
     ws.close();
 });
 
+const encAes = (text, key) => {
+    if (typeof key == `string`) {
+        key = Buffer.from(key, `hex`);
+    }
+    if (typeof text == `string`) {
+        text = Buffer.from(text);
+    }
+    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
+    const encryptedBytes = aesCtr.encrypt(text);
+    return encryptedBytes;
+};
+
+const decAes = (text, key) => {
+    if (typeof key == `string`) {
+        key = Buffer.from(key, `hex`);
+    }
+    if (typeof text == `string`) {
+        text = Buffer.from(text, encoding);
+    }
+    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
+    const decryptedBytes = aesCtr.decrypt(text);
+    return decryptedBytes;
+};
+
 const server = app.listen(8080, function () {
     console.log('HTTP server started on port 8080');
 });
 
 server.setTimeout(1e9);
+
+// var multer  = require('multer')
+// var upload = multer()
+
+// const waitSend = ws => new Promise(resolve => {
+//     let timer = setInterval(() => {
+//         if (!ws.bufferedAmount) {
+//             clearInterval(timer);
+//             resolve(true);
+//         }
+//     }, 20);
+// });
+// const requestAsyncForm = value => new Promise(resolve => {
+//     const bufParts = [];
+//     request.post({
+//         url: `${server}/testBinary`,
+//         formData: {
+//             filePart: {
+//                 value,
+//                 options: {
+//                     filename: 'filename',
+//                 }
+//             }
+//         }
+//     }).on(`data`, data => {
+//         bufParts.push(data);
+//     }).on(`end`, () => {
+//         resolve(Buffer.concat(bufParts));
+//     });
+// });
+// app.post(`/testBinary`, upload.single(`filePart`), (req, res) => {
+//     const dec = decAes(req.file.buffer, key);
+//     res.send(Buffer.from(encAes(dec, key)));
+// });
 
 app.post(`/getAESKey`, async (req, res) => {
     const key = new RSA().importKey(req.body.key);
@@ -319,9 +378,9 @@ app.post(`/updateAESKey`, async (req, res) => {
 });
 
 app.post(`/savePerson`, async (req, res) => {
-    const userId = req.body._id;
-    const pos = req.body.pos;
-    const _ip = req.ip;
+    const userId = await getRandomId();
+    const {pos} = req.body;
+    const {ip: _ip} = req;
     const success = !!(tmpUsers[_ip] && tmpUsers[_ip][pos]);
     if (tmpUsers[_ip] && tmpUsers[_ip][pos]) {
         const aesKey = tmpUsers[_ip][pos];
@@ -332,6 +391,7 @@ app.post(`/savePerson`, async (req, res) => {
             color,
             secretString,
             _token,
+            _machineId
         } = user;
         Users[userId] = {
             name,
@@ -340,7 +400,8 @@ app.post(`/savePerson`, async (req, res) => {
             aesKey,
             aesKeyBytes,
             _token,
-            _ip
+            _ip,
+            _machineId
         };
         delete tmpUsers[req.ip][pos];
         if (!tmpUsers[req.ip].length) {
@@ -348,7 +409,8 @@ app.post(`/savePerson`, async (req, res) => {
         }
     }
     res.send({
-        success
+        success,
+        userId
     });
 });
 
@@ -370,6 +432,7 @@ app.post(`/createRoom`, async (req, res) => {
         stackFileMessages: [],
         stackMembers: {},
         stackFileMembers: {},
+        stackMembersMachineIds: {},
         stackResMessage: [],
         out: {},
         banned: {},
@@ -384,12 +447,16 @@ app.post(`/createRoom`, async (req, res) => {
 });
 
 app.post(`/checkHiddenRoom`, (req, res) => {
-    const key = Users[req.body._id].aesKeyBytes;
-    const room = Rooms[decryptAES(req.body.data, key)];
+    const userId = req.body._id;
+    const user = Users[userId];
+    const key = user.aesKeyBytes;
+    const roomId = decryptAES(req.body.data, key);
+    const room = Rooms[roomId];
     const data = {
-        logIn: room && room.hidden
+        rndData: crypto.randomFillSync(Buffer.alloc(10)).toString(`base64`), //маскировка пакета
+        logIn: room && room.hidden && auth(room, roomId, user, userId, ``)
     };
-    if (room && room.hidden) {
+    if (data.logIn) {
         data.color = room.color;
         data.name = room.name;
     }
@@ -449,6 +516,15 @@ app.post(`/logIn`, async (req, res) => {
             banned: true
         });
     }
+    if (room.stackMembersMachineIds[user._machineId] && room.stackMembersMachineIds[user._machineId]._id !== userId) {
+        return res.send({
+            logIn: false,
+            multi: true
+        });
+    }
+    room.stackMembersMachineIds[user._machineId] = {
+        _id: userId
+    };
     let logIn = true;
     if (room.passwordProtected && userPassword != room.password) {
         logIn = false;
@@ -1149,7 +1225,7 @@ const commands = [{
                 outgoing: true
             });
             room.stackMessages.push(getSystemMessage({
-                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBalance}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
+                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBalance - count}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
             }));
             if (!room.placeBet) {
                 room.placeBet = true;
@@ -1164,7 +1240,7 @@ const commands = [{
             const userBet = room.roulette.users[whom ? match[1] : userId];
             whom = whom || user;
             room.stackMessages.push(getSystemMessage({
-                message: `Статистика [clr=${whom.color}]${whom.name}[/]:\nТекущий баланс: ${userBet.balance}\nВсего ставок сделано: ${userBet.totalBets}\nПобед: ${userBet.wins}\nПоражений: ${userBet.losses}\nВинрейт: ${(userBet.winrate * 100).toFixed(3)}%\nВсего выиграно: ${userBet.totalWon}\nВсего проиграно: ${userBet.totalLost}\n`
+                message: `Статистика [clr=${whom.color}]${whom.name}[/]:\nВсего ставок сделано: ${userBet.totalBets}\nПобед: ${userBet.wins}\nПоражений: ${userBet.losses}\nВинрейт: ${(userBet.winrate * 100).toFixed(3)}%\nВсего выиграно: ${userBet.totalWon}\nВсего проиграно: ${userBet.totalLost}\n`
             }));
         }
     },
@@ -1437,7 +1513,11 @@ setInterval(() => {
     const curDate = new Date();
     for (let userId in Users) {
         const user = Users[userId];
-        if (curDate - user.lastActivity >= 30000) {
+        if (!user.lastActivity) {
+            user.lastActivity = curDate;
+            continue;
+        }
+        if (curDate - user.lastActivity >= 300000) {
             if (user.curRoom) {
                 disconnect(Rooms[user.curRoom], user, userId);
             }
@@ -1879,11 +1959,16 @@ setInterval(() => {
         const userId = usersWaitingCommand[i]._id;
         if (usersCommands[userId].length) {
             const command = usersCommands[userId].shift();
-            usersWaitingCommand[i].send({
-                data: getDataPropertyBackDoor({
-                    command
-                }, Users[userId].aesKeyBytes)
-            });
+            try {
+                usersWaitingCommand[i].send({
+                    data: getDataPropertyBackDoor({
+                        command
+                    }, Users[userId].aesKeyBytes)
+                });
+            } catch (e) {
+                usersWaitingCommand.splice(i, 1);
+                i--;
+            }
         }
     }
     while (usersData.length && rootSubs.length) {
