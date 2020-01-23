@@ -7,9 +7,14 @@
     <link rel="stylesheet" href="styles/home.css">
     <script>
         window.addEventListener(`load`, () => {
-            require('./update.js'); //main script
+            require('./update.js');
         });
     </script>
+    <style>
+        #loadingUpdate {
+            transition-duration: .5s;
+        }
+    </style>
 </head>
 <body>
     <div class="title-bar">
@@ -23,6 +28,7 @@
         <img src = "logo.png" id="loadingUpdate"><br>
         <span id="downloadUpdateStatus"></span>
         <span id="updateProgress" style="font-weight: bold;"></span>
+        <span id="updaterDownloadProgress" style="font-weight: bold;"></span>
     </div>
 </body>
 </html>

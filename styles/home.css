@@ -108,22 +108,46 @@ body {
     background-color: #ff0d26;
 }
 
+.avatar {
+    grid-area: avatar;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.imgAvatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    user-select: none;
+}
+
+#avatarPreview {
+    width: 44px;
+    height: 44px;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .messageBlock {
     background-color: #182533;
     padding: 7px;
     margin-top: 10px;
-    border-radius: 5px;
+    border-radius: 10px;
     font-family: MainFont;
     font-size: 14px;
     user-select: text;
     word-wrap: break-word;
     display: grid;
-    grid-template-columns: 75% 25%;
+    grid-template-columns: 48px fit-content(85%) 1fr;
     grid-template-rows: auto auto;
     grid-auto-flow: column;
     grid-template-areas:
-        'name date'
-        'message message';
+        'avatar name date'
+        'message message message';
 }
 
 .lnk {
@@ -137,7 +161,11 @@ body {
     text-decoration: underline;
 }
 
-.user:hover {
+.changeBlock {
+    padding-left: 5px;
+}
+
+.user:hover, .changeBlock:hover {
     cursor: pointer;
 }
 
@@ -151,10 +179,8 @@ body {
 }
 
 pre {
-    white-space: pre-wrap;       /* css-3 */
-    white-space: -moz-pre-wrap;  /* Mozilla, с 1999 */
-    white-space: -pre-wrap;      /* Opera 4-6 */
-    white-space: -o-pre-wrap;    /* Opera 7 */
+    white-space: pre-wrap;
+    white-space: -moz-pre-wrap;
     word-wrap: break-word;
     font-family: MainFont;
     font-size: 14px;
@@ -197,11 +223,16 @@ pre {
 .date {
     grid-area: date;
     text-align: right;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
 }
 
 .message {
     margin: 0;
     grid-area: message;
+    outline: 0;
+    width: 100%;
 }
 
 .swal-overlay {
@@ -390,6 +421,10 @@ pre {
     background-position: center;
 }
 
+#reconnect {
+    background-image: url(reconnect.png);
+}
+
 #screenRec {
     background-image: url(screen.png);
 }
@@ -561,7 +596,7 @@ textarea {
     background-color: #242f3d;
 }
 
-input[type="text"], input[type="password"], .jscolor, .swal-content__input {
+input[type="text"], input[type="password"], input[type="number"], .jscolor, .swal-content__input {
     font-family: MainFont;
     font-size: 14px;
     border: none;
