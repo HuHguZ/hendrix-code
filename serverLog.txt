@@ -1,0 +1,162 @@
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:47:960",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:53:792",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:54:272",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:54:457",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:54:614",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:54:773",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:27:54:937",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:212:36)\n    at /root/hendrix-code/node_modules/mongodb-core/lib/connection/pool.js:457:18\n    at processTicksAndRejections (node:internal/process/task_queues:78:11)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:361",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:676:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:421",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:434",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:436",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:439",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:441",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:444",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:446",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:448",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:449",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:28:51:450",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:29:07:351",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:282:36)\n    at Callbacks.emit (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:95:3)\n    at Connection.messageHandler (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:243:23)\n    at Socket.<anonymous> (/root/hendrix-code/node_modules/mongodb-core/lib/connection/connection.js:262:22)\n    at Socket.emit (node:events:394:28)\n    at addChunk (node:internal/streams/readable:312:12)\n    at readableAddChunk (node:internal/streams/readable:287:9)\n    at Socket.Readable.push (node:internal/streams/readable:226:10)\n    at TCP.onStreamRead (node:internal/stream_base_commons:190:23)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:29:07:685",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:282:36)\n    at Callbacks.emit (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:95:3)\n    at Connection.messageHandler (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:243:23)\n    at Socket.<anonymous> (/root/hendrix-code/node_modules/mongodb-core/lib/connection/connection.js:262:22)\n    at Socket.emit (node:events:394:28)\n    at addChunk (node:internal/streams/readable:312:12)\n    at readableAddChunk (node:internal/streams/readable:287:9)\n    at Socket.Readable.push (node:internal/streams/readable:226:10)\n    at TCP.onStreamRead (node:internal/stream_base_commons:190:23)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:29:07:822",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:282:36)\n    at Callbacks.emit (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:95:3)\n    at Connection.messageHandler (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:243:23)\n    at Socket.<anonymous> (/root/hendrix-code/node_modules/mongodb-core/lib/connection/connection.js:262:22)\n    at Socket.emit (node:events:394:28)\n    at addChunk (node:internal/streams/readable:312:12)\n    at readableAddChunk (node:internal/streams/readable:287:9)\n    at Socket.Readable.push (node:internal/streams/readable:226:10)\n    at TCP.onStreamRead (node:internal/stream_base_commons:190:23)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:29:07:961",
+    "message": "Unsupported projection option: projection: { balance: true }",
+    "stack": "MongoError: Unsupported projection option: projection: { balance: true }\n    at Function.MongoError.create (/root/hendrix-code/node_modules/mongodb-core/lib/error.js:31:11)\n    at queryCallback (/root/hendrix-code/node_modules/mongodb-core/lib/cursor.js:282:36)\n    at Callbacks.emit (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:95:3)\n    at Connection.messageHandler (/root/hendrix-code/node_modules/mongodb-core/lib/topologies/server.js:243:23)\n    at Socket.<anonymous> (/root/hendrix-code/node_modules/mongodb-core/lib/connection/connection.js:262:22)\n    at Socket.emit (node:events:394:28)\n    at addChunk (node:internal/streams/readable:312:12)\n    at readableAddChunk (node:internal/streams/readable:287:9)\n    at Socket.Readable.push (node:internal/streams/readable:226:10)\n    at TCP.onStreamRead (node:internal/stream_base_commons:190:23)"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:30:34:430",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:30:34:471",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:30:34:473",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:30:34:474",
+    "message": "Cannot read property 'cipherInfo' of undefined",
+    "stack": "TypeError: Cannot read property 'cipherInfo' of undefined\n    at getDecryptedData (/root/hendrix-code/serverMessenger.js:185:35)\n    at /root/hendrix-code/serverMessenger.js:1518:24\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at next (/root/hendrix-code/node_modules/express/lib/router/route.js:137:13)\n    at Route.dispatch (/root/hendrix-code/node_modules/express/lib/router/route.js:112:3)\n    at Layer.handle [as handle_request] (/root/hendrix-code/node_modules/express/lib/router/layer.js:95:5)\n    at /root/hendrix-code/node_modules/express/lib/router/index.js:281:22\n    at Function.process_params (/root/hendrix-code/node_modules/express/lib/router/index.js:335:12)\n    at next (/root/hendrix-code/node_modules/express/lib/router/index.js:275:10)\n    at /root/hendrix-code/node_modules/body-parser/lib/read.js:130:5"
+}
+
+{
+    "date": "воскресенье, 5 сентября 2021 г., 15:30:45:457",
+    "message": "ObjectID is not a function",
+    "stack": "TypeError: ObjectID is not a function\n    at /root/hendrix-code/serverMessenger.js:1566:14"
+}
+
