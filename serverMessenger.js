@@ -69,6 +69,7 @@ process
 let hendrixDatabase = {};
 
 const addDataToCollection = (collection, data) => new Promise((resolve, reject) => {
+    console.log(data);
     collection.insertOne(data, (err, data) => {
         if (err) {
             reject(err);
