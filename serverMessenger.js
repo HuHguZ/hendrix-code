@@ -1142,7 +1142,7 @@ const commands = [{
                     }
                     operationRecipientObj._id = operationSenderObj._id = recipient;
                     await changeUserBalance(user._account.objId, -count, operationSenderObj);
-                    await changeUserBalance(ObjectId(recipient), count, operationRecipientObj);
+                    await changeUserBalance(recipient, count, operationRecipientObj);
                     return {
                         message: `[clr=${user.color}]${user.name}[/], Вы успешно перевели [clr=${user.color} bold]${count}[/] на счет [bold]${recipient}[/]`
                     };
@@ -1344,7 +1344,7 @@ const commands = [{
                 };
                 if (!whom) {
                     if (await accountExists(recipient)) {
-                        await changeUserBalance(ObjectId(recipient), count, operationObj);
+                        await changeUserBalance(recipient, count, operationObj);
                         return {
                             message: `Счет [bold]${recipient}[/] изменён на [clr=${count > 0 ? `green bold]+` : `red bold]`}${count}[/]!`
                         };
@@ -1529,7 +1529,7 @@ const accountExists = async _id => {
     if (_id.length != 24) {
         return false;
     }
-    _id = ObjectId(_id);
+    _id = _id;
     return !!(await findDataInCollection(hendrixDatabase.accounts, {
         _id
     }, {
@@ -1592,7 +1592,7 @@ const getLogInAcc = async data => {
     } = data;
     _id = Buffer.from(_id, `hex`).toString(`hex`);
     const account = _id.length == 24 ? await findDataInCollection(hendrixDatabase.accounts, {
-        _id: ObjectId(_id),
+        _id,
         password: {
             $eq: password
         }
@@ -1620,7 +1620,7 @@ app.post(`/loginInAccount`, async (req, res) => {
         resObj.balance = getAccR.account.balance;
         user._account = {
             id: data._id,
-            objId: ObjectId(data._id)
+            objId: data._id
         };
     } else if (user._account && user._account.id == data._id) {
         delete user._account;
@@ -1635,7 +1635,7 @@ app.post(`/changeAccountPassword`, async (req, res) => {
     const user = Users[userId];
     const data = await getDecryptedData(req.body.data, user);
     const success = !!(await updateDataInCollection(hendrixDatabase.accounts, {
-        _id: ObjectId(data._id),
+        _id: data._id,
         password: {
             $eq: data.password
         }
@@ -1657,7 +1657,7 @@ app.post(`/deleteAccount`, async (req, res) => {
     const user = Users[userId];
     const data = await getDecryptedData(req.body.data, user);
     const success = !!(await deleteDataInCollection(hendrixDatabase.accounts, {
-        _id: ObjectId(data._id),
+        _id: data._id,
         password: {
             $eq: data.password
         }
@@ -1675,7 +1675,7 @@ app.post(`/getOperationsHistory`, async (req, res) => {
     const user = Users[userId];
     const data = await getDecryptedData(req.body.data, user);
     const historyPart = await findDataInCollection(hendrixDatabase.accounts, {
-        _id: ObjectId(data._id),
+        _id: data._id,
         password: {
             $eq: data.password
         }
