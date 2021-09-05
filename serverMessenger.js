@@ -69,8 +69,7 @@ process
 let hendrixDatabase = {};
 
 const addDataToCollection = (collection, data) => new Promise((resolve, reject) => {
-    console.log(data);
-    collection.insertOne(data, (err, data) => {
+    collection.insertOne(JSON.stringify(data), (err, data) => {
         if (err) {
             reject(err);
         } else {
@@ -1566,7 +1565,7 @@ app.post(`/createAccount`, async (req, res) => {
     } = data;
     const _id = await getRandomId(12);
     await addDataToCollection(hendrixDatabase.accounts, {
-        _id: ObjectId(_id),
+        _id,
         password,
         balance: 0,
         operations: []
