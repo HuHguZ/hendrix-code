@@ -110,8 +110,10 @@ const deleteDataInCollection = (collection, filter) => new Promise((resolve, rej
 
 MongoClient.connect(`mongodb://localhost:27017`, {
     useNewUrlParser: true,
-    useUnifiedTopology: true
+    useUnifiedTopology: true,
+    promoteBuffers: true,
 }, function (err, client) {
+    console.log(client);
     hendrixDatabase.accounts = client.db(`hendrix`).collection(`accounts`);
     if (err) {
         console.log(err);
